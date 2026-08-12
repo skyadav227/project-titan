@@ -63,26 +63,44 @@ export default function AIMentorCard() {
       </div>
 
       {/* CTA */}
-      <div className="mt-auto">
-        <Link
-          to={mentor.ctaRoute}
-          className="
-            inline-flex items-center gap-2
-            px-4 py-2.5
-            bg-white/[0.06] border border-white/[0.10]
-            text-sm font-medium text-white/80
-            rounded-xl
-            hover:bg-white/[0.10] hover:border-white/[0.18] hover:text-white
-            transition-all duration-150
-            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30
-          "
-        >
-          {mentor.ctaLabel}
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-            <path d="M2 6h8M6 2l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </Link>
-      </div>
+
+      {/* CTA — returning users only */}
+      {!isFirstTimeUser && (
+        <div className="mt-auto">
+          <Link
+            to={mentor.ctaRoute}
+            className="
+        inline-flex items-center gap-2
+        px-4 py-2.5
+        bg-white/[0.06] border border-white/[0.10]
+        text-sm font-medium text-white/80
+        rounded-xl
+        hover:bg-white/[0.10] hover:border-white/[0.18] hover:text-white
+        transition-all duration-150
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30
+      "
+          >
+            {mentor.ctaLabel}
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M2 6h8M6 2l4 4-4 4"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </Link>
+        </div>
+      )}
+
+
     </DashboardCard>
   );
 }

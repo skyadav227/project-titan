@@ -14,9 +14,9 @@
 
 export const firstTimeUserData = {
   user: {
-    name: "Aryan",
-    email: "aryan@example.com",
-    avatarInitials: "AK",
+    name: "Sher",
+    email: "Karthik@example.com",
+    avatarInitials: "SKY",
     joinedDate: "2026-08-06",
   },
 
@@ -28,7 +28,7 @@ export const firstTimeUserData = {
     overallScore: null,
   },
 
-  onboarding: {
+  onboarding: { 
     // Each item: { id, label, completed, action (route or null) }
     checklist: [
       { id: "resume",    label: "Upload your resume",        completed: false, route: "/resume" },
@@ -52,9 +52,9 @@ export const firstTimeUserData = {
 
 export const returningUserData = {
   user: {
-    name: "Aryan",
-    email: "aryan@example.com",
-    avatarInitials: "AK",
+    name: "Sher",
+    email: "Karthik@example.com",
+    avatarInitials: "SKY",
     joinedDate: "2026-06-14",
   },
 
@@ -192,7 +192,7 @@ export const returningUserData = {
 
   resume: {
     uploaded: true,
-    fileName: "aryan_kumar_resume_v3.pdf",
+    fileName: "Karthik_Yadav_resume_v3.pdf",
     lastUpdated: "2026-08-02",
     matchScore: 84,       // % match for current target role
   },
