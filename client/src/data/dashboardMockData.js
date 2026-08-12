@@ -2,24 +2,19 @@
  * dashboardMockData.js
  *
  * Realistic mock data for the TITAN Dashboard.
- * This file is the single source of truth for all dashboard card content.
- * Replace these values with real API responses when the backend is ready.
+ * This file is the temporary source of dashboard-specific mock data.
+ *
+ * User identity is NOT stored here.
+ * It comes from AuthContext → GET /api/auth/me.
  *
  * Two exports:
- *   firstTimeUserData  — user who has never completed an interview
- *   returningUserData  — user with a history of completed interviews
+ * firstTimeUserData  — user who has never completed an interview
+ * returningUserData  — user with a history of completed interviews
  */
 
-// ─── First-Time User ────────────────────────────────────────────────────────
+// ─── First-Time User ─────────────────────────────────────────────────────────
 
 export const firstTimeUserData = {
-  user: {
-    name: "Sher",
-    email: "Karthik@example.com",
-    avatarInitials: "SKY",
-    joinedDate: "2026-08-06",
-  },
-
   stats: {
     interviewsCompleted: 0,
     streak: 0,
@@ -28,21 +23,48 @@ export const firstTimeUserData = {
     overallScore: null,
   },
 
-  onboarding: { 
+  onboarding: {
     // Each item: { id, label, completed, action (route or null) }
     checklist: [
-      { id: "resume",    label: "Upload your resume",        completed: false, route: "/resume" },
-      { id: "role",      label: "Choose your target role",   completed: false, route: "/interview" },
-      { id: "skills",    label: "Select your tech stack",    completed: false, route: "/interview" },
-      { id: "interview", label: "Complete your first interview", completed: false, route: "/interview" },
-      { id: "report",    label: "Review your first report",  completed: false, route: "/report" },
+      {
+        id: "resume",
+        label: "Upload your resume",
+        completed: false,
+        route: "/resume",
+      },
+      {
+        id: "role",
+        label: "Choose your target role",
+        completed: false,
+        route: "/interview",
+      },
+      {
+        id: "skills",
+        label: "Select your tech stack",
+        completed: false,
+        route: "/interview",
+      },
+      {
+        id: "interview",
+        label: "Complete your first interview",
+        completed: false,
+        route: "/interview",
+      },
+      {
+        id: "report",
+        label: "Review your first report",
+        completed: false,
+        route: "/report",
+      },
     ],
   },
 
   // First-time AI mentor content is purely explanatory
   aiMentor: {
-    recommendation: "Start by uploading your resume so TITAN can tailor every question to your real experience.",
-    reason: "Resume-aware interviews feel 40% more realistic and produce more actionable feedback.",
+    recommendation:
+      "Start by uploading your resume so TITAN can tailor every question to your real experience.",
+    reason:
+      "Resume-aware interviews feel 40% more realistic and produce more actionable feedback.",
     ctaLabel: "Upload Resume",
     ctaRoute: "/resume",
   },
@@ -51,50 +73,60 @@ export const firstTimeUserData = {
 // ─── Returning User ──────────────────────────────────────────────────────────
 
 export const returningUserData = {
-  user: {
-    name: "Sher",
-    email: "Karthik@example.com",
-    avatarInitials: "SKY",
-    joinedDate: "2026-06-14",
-  },
-
   stats: {
     interviewsCompleted: 12,
-    streak: 5,           // days
-    rank: 142,           // leaderboard position
+    streak: 5, // days
+    rank: 142, // leaderboard position
     totalUsers: 4800,
     level: "Intermediate",
-    levelProgress: 68,   // % toward next level
-    overallScore: 74,    // out of 100
-    previousScore: 68,   // last week
+    levelProgress: 68, // % toward next level
+    overallScore: 74, // out of 100
+    previousScore: 68, // last week
   },
 
   performance: {
-    overall:       { score: 74, delta: +6 },
+    overall: { score: 74, delta: +6 },
     communication: { score: 81, delta: +4 },
-    technical:     { score: 67, delta: +8 },
-    confidence:    { score: 72, delta: +3 },
+    technical: { score: 67, delta: +8 },
+    confidence: { score: 72, delta: +3 },
   },
 
   todaysMissions: [
-    { id: "m1", label: "Complete one interview",         completed: true,  route: "/interview" },
-    { id: "m2", label: "Review yesterday's report",      completed: false, route: "/report" },
-    { id: "m3", label: "Practice system design answers", completed: false, route: "/interview" },
+    {
+      id: "m1",
+      label: "Complete one interview",
+      completed: true,
+      route: "/interview",
+    },
+    {
+      id: "m2",
+      label: "Review yesterday's report",
+      completed: false,
+      route: "/report",
+    },
+    {
+      id: "m3",
+      label: "Practice system design answers",
+      completed: false,
+      route: "/interview",
+    },
   ],
 
   skills: {
     strong: [
-      { name: "React",            level: 88 },
-      { name: "Communication",    level: 81 },
-      { name: "Problem Solving",  level: 78 },
-      { name: "JavaScript",       level: 76 },
+      { name: "React", level: 88 },
+      { name: "Communication", level: 81 },
+      { name: "Problem Solving", level: 78 },
+      { name: "JavaScript", level: 76 },
     ],
+
     improve: [
-      { name: "System Design",    level: 51 },
-      { name: "SQL",              level: 55 },
-      { name: "Behavioural",      level: 58 },
-      { name: "TypeScript",       level: 62 },
+      { name: "System Design", level: 51 },
+      { name: "SQL", level: 55 },
+      { name: "Behavioural", level: 58 },
+      { name: "TypeScript", level: 62 },
     ],
+
     recommended: [
       "STAR method answers",
       "LLD interview patterns",
@@ -103,8 +135,10 @@ export const returningUserData = {
   },
 
   aiMentor: {
-    recommendation: "Focus on system design this week — it's your weakest area and appears in 80% of senior frontend interviews.",
-    reason: "Your last 3 interviews included system design questions where scores dropped below 55.",
+    recommendation:
+      "Focus on system design this week — it's your weakest area and appears in 80% of senior frontend interviews.",
+    reason:
+      "Your last 3 interviews included system design questions where scores dropped below 55.",
     ctaLabel: "Practice System Design",
     ctaRoute: "/interview",
   },
@@ -190,11 +224,13 @@ export const returningUserData = {
     },
   ],
 
+  // Temporary mock resume data.
+  // This will eventually be replaced by ResumeContext.
   resume: {
     uploaded: true,
     fileName: "Karthik_Yadav_resume_v3.pdf",
     lastUpdated: "2026-08-02",
-    matchScore: 84,       // % match for current target role
+    matchScore: 84,
   },
 
   notifications: [
