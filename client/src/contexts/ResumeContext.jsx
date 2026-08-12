@@ -290,6 +290,6 @@ export function ResumeProvider({ children }) {
 // eslint-disable-next-line react-refresh/only-export-components
 export function useResume() {
   const ctx = useContext(ResumeContext);
-  if (!ctx) throw new Error("useResume must be used within ResumeProvider");
+  if (!ctx) throw new Error("useResume must be used within ");
   return ctx;
 }

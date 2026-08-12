@@ -135,9 +135,7 @@ function ResumeContent() {
 export default function ResumePage() {
   return (
     <DashboardLayout>
-      <ResumeProvider>
         <ResumeContent />
-      </ResumeProvider>
     </DashboardLayout>
   );
 }
