@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthLayout from "../layouts/AuthLayout";
+import { register } from "../services/authService";
+import { useAuth } from "../contexts/AuthContext";
 
 /* ── Validators ── */
 const validate = {
@@ -172,6 +174,7 @@ const INIT_TOUCHED = { fullName: false, email: false, password: false, confirmPa
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const { signIn } = useAuth();
   const [values, setValues]     = useState(INIT_VALUES);
   const [errors, setErrors]     = useState(INIT_ERRORS);
   const [touched, setTouched]   = useState(INIT_TOUCHED);
@@ -222,8 +225,8 @@ export default function RegisterPage() {
     setIsLoading(true);
     setFormError("");
     try {
-      // TODO: connect registration API
-      await new Promise((r) => setTimeout(r, 1600));
+      const data = await register({ name: values.fullName, email: values.email, password: values.password });
+      signIn(data.user);
       navigate("/dashboard");
     } catch {
       setFormError("Something went wrong. Please try again.");

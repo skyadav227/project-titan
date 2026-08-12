@@ -4,48 +4,40 @@
  * Returning User only. Highlights strengths and improvement areas.
  *
  * Per spec (Component Spec §6, UI Spec §14):
- *   Displays: Strong Skills, Needs Improvement, Recommended Topics
- *   Rules:
- *     - Easy to scan
- *     - Avoid large charts
- *     - Tags preferred
- *     - Simple progress indicators are fine
- *     - Information understandable within a few seconds
+ *   - Easy to scan
+ *   - Avoid large charts
+ *   - Tags preferred
+ *   - Simple progress indicators
+ *
+ * Milestone 5 additions:
+ *   - AnimatedBar fills in for each skill row
+ *   - Card enters with staggered fadeInUp
  */
 import { useDashboard } from "../../../contexts/DashboardContext";
 import DashboardCard from "../ui/DashboardCard";
 import SectionLabel from "../ui/SectionLabel";
 import EmptyState from "../ui/EmptyState";
+import AnimatedBar from "../ui/AnimatedBar";
 import { IconReports } from "../ui/DashboardIcons";
 
-// ─── Skill row with a compact progress bar ────────────────────────────────────
+// ─── Skill row ────────────────────────────────────────────────────────────────
 
-function SkillRow({ name, level, variant }) {
-  const barColor =
-    variant === "strong"
-      ? "bg-white/50"
-      : "bg-amber-400/50";
-
-  const labelColor =
-    variant === "strong"
-      ? "text-white/65"
-      : "text-amber-400/80";
+function SkillRow({ name, level, variant, barDelay }) {
+  const barColor  = variant === "strong" ? "bg-white/50"    : "bg-amber-400/50";
+  const textColor = variant === "strong" ? "text-white/65"  : "text-amber-400/80";
 
   return (
     <li className="flex items-center gap-3 py-1.5">
       <span className="flex-1 text-sm text-white/60 min-w-0 truncate">{name}</span>
       <div className="flex items-center gap-2 flex-shrink-0">
-        <div
-          className="w-20 h-1.5 rounded-full bg-white/[0.06] overflow-hidden"
-          role="presentation"
-          aria-hidden="true"
-        >
-          <div
-            className={`h-full rounded-full ${barColor}`}
-            style={{ width: `${level}%` }}
-          />
-        </div>
-        <span className={`text-xs tabular-nums font-medium w-8 text-right ${labelColor}`}>
+        <AnimatedBar
+          value={level}
+          colorClass={barColor}
+          className="w-20"
+          height="h-1.5"
+          delay={barDelay}
+        />
+        <span className={`text-xs tabular-nums font-medium w-8 text-right ${textColor}`}>
           {level}
         </span>
       </div>
@@ -53,7 +45,7 @@ function SkillRow({ name, level, variant }) {
   );
 }
 
-// ─── Recommended topic tag ────────────────────────────────────────────────────
+// ─── Topic tag ────────────────────────────────────────────────────────────────
 
 function TopicTag({ label }) {
   return (
@@ -79,7 +71,7 @@ export default function SkillsOverviewCard() {
 
   if (!skills) {
     return (
-      <DashboardCard>
+      <DashboardCard enterIndex={4}>
         <EmptyState
           icon={<IconReports className="w-5 h-5" />}
           message="Complete interviews to discover your skill profile and improvement areas."
@@ -91,7 +83,7 @@ export default function SkillsOverviewCard() {
   }
 
   return (
-    <DashboardCard className="flex flex-col gap-5">
+    <DashboardCard className="flex flex-col gap-5" enterIndex={4}>
       {/* Header */}
       <div className="flex flex-col gap-1">
         <SectionLabel>Skills</SectionLabel>
@@ -104,13 +96,18 @@ export default function SkillsOverviewCard() {
           Strengths
         </p>
         <ul className="flex flex-col" role="list" aria-label="Strong skills">
-          {skills.strong.map((s) => (
-            <SkillRow key={s.name} name={s.name} level={s.level} variant="strong" />
+          {skills.strong.map((s, i) => (
+            <SkillRow
+              key={s.name}
+              name={s.name}
+              level={s.level}
+              variant="strong"
+              barDelay={120 + i * 60}
+            />
           ))}
         </ul>
       </div>
 
-      {/* Divider */}
       <div className="h-px bg-white/[0.05]" aria-hidden="true" />
 
       {/* Needs Improvement */}
@@ -119,13 +116,18 @@ export default function SkillsOverviewCard() {
           Needs work
         </p>
         <ul className="flex flex-col" role="list" aria-label="Skills needing improvement">
-          {skills.improve.map((s) => (
-            <SkillRow key={s.name} name={s.name} level={s.level} variant="improve" />
+          {skills.improve.map((s, i) => (
+            <SkillRow
+              key={s.name}
+              name={s.name}
+              level={s.level}
+              variant="improve"
+              barDelay={360 + i * 60}
+            />
           ))}
         </ul>
       </div>
 
-      {/* Divider */}
       <div className="h-px bg-white/[0.05]" aria-hidden="true" />
 
       {/* Recommended topics */}

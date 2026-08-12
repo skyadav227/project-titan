@@ -13,6 +13,7 @@ import { Link } from "react-router-dom";
 import { useDashboard } from "../../../contexts/DashboardContext";
 import DashboardCard from "../ui/DashboardCard";
 import SectionLabel from "../ui/SectionLabel";
+import AnimatedBar from "../ui/AnimatedBar";
 import { IconCheck } from "../ui/DashboardIcons";
 
 function MissionItem({ mission }) {
@@ -76,7 +77,7 @@ export default function TodaysMissionCard() {
   const doneCount = missions.filter((m) => m.completed).length;
 
   return (
-    <DashboardCard className="flex flex-col gap-4">
+    <DashboardCard className="flex flex-col gap-4" enterIndex={2}>
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex flex-col gap-1">
@@ -97,20 +98,16 @@ export default function TodaysMissionCard() {
         </span>
       </div>
 
-      {/* Progress bar */}
-      <div
-        className="h-1 rounded-full bg-white/[0.06] overflow-hidden"
-        role="progressbar"
+      {/* Animated progress bar */}
+      <AnimatedBar
+        value={(doneCount / missions.length) * 100}
+        colorClass="bg-white/50"
+        delay={80}
         aria-valuenow={doneCount}
         aria-valuemin={0}
         aria-valuemax={missions.length}
         aria-label="Daily mission progress"
-      >
-        <div
-          className="h-full rounded-full bg-white/50 transition-all duration-500"
-          style={{ width: `${(doneCount / missions.length) * 100}%` }}
-        />
-      </div>
+      />
 
       {/* Mission list */}
       <ul className="flex flex-col" role="list" aria-label="Today's missions">

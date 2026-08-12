@@ -25,7 +25,7 @@ export default function AIMentorCard() {
   const mentor = data.aiMentor;
 
   return (
-    <DashboardCard className="flex flex-col gap-5">
+    <DashboardCard className="flex flex-col gap-5" enterIndex={3} hoverable>
       {/* Header */}
       <div className="flex items-center gap-3">
         <div

@@ -105,7 +105,7 @@ export default function ActivityFeedCard() {
   const feed = data.activityFeed ?? [];
 
   return (
-    <DashboardCard className="flex flex-col gap-4">
+    <DashboardCard className="flex flex-col gap-4" enterIndex={7}>
       {/* Header */}
       <div className="flex flex-col gap-1">
         <SectionLabel>Timeline</SectionLabel>

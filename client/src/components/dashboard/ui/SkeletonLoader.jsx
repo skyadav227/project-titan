@@ -4,33 +4,57 @@
  * Shimmer skeleton used while dashboard sections load.
  * Preserves layout to prevent content shift.
  *
+ * Per spec (UI Spec §23, Component Spec Loading Rules):
+ *   "Skeleton loaders are preferred."
+ *   "Loading should preserve layout to prevent content shifting."
+ *   "Never shift layouts while loading."
+ *
+ * Uses the .dash-skeleton CSS class which provides the sweep animation.
+ *
  * Props:
- *   className : string  — controls width, height, border-radius
- *   lines     : number  — renders N stacked skeleton lines (optional pattern)
+ *   className : string  — controls width, height, border-radius, additional classes
+ *   lines     : number  — if > 0, renders N stacked line-shaped skeletons
+ *   card      : boolean — if true, renders a full card-shaped skeleton
  */
-export default function SkeletonLoader({ className = "", lines = 0 }) {
-  const shimmerClass = `
-    bg-white/[0.05] rounded-lg
-    relative overflow-hidden
-    before:absolute before:inset-0
-    before:bg-gradient-to-r
-    before:from-transparent before:via-white/[0.04] before:to-transparent
-    before:translate-x-[-100%]
-    before:animate-[shimmer_1.8s_ease_infinite]
-  `;
+export default function SkeletonLoader({ className = "", lines = 0, card = false }) {
+  const base = "dash-skeleton";
+
+  if (card) {
+    return (
+      <div
+        className={`
+          ${base}
+          rounded-2xl border border-white/[0.05]
+          ${className}
+        `}
+        aria-hidden="true"
+        role="presentation"
+      />
+    );
+  }
 
   if (lines > 0) {
     return (
-      <div className={`flex flex-col gap-3 ${className}`}>
+      <div
+        className={`flex flex-col gap-3 ${className}`}
+        aria-hidden="true"
+        role="presentation"
+      >
         {Array.from({ length: lines }).map((_, i) => (
           <div
             key={i}
-            className={`h-4 ${i === lines - 1 ? "w-3/4" : "w-full"} ${shimmerClass}`}
+            className={`${base} h-4 rounded-lg ${i === lines - 1 ? "w-3/4" : "w-full"}`}
           />
         ))}
       </div>
     );
   }
 
-  return <div className={`${shimmerClass} ${className}`} />;
+  return (
+    <div
+      className={`${base} ${className}`}
+      aria-hidden="true"
+      role="presentation"
+    />
+  );
 }

@@ -238,6 +238,7 @@ export default function DashboardHeader() {
         bg-[#0a0a0a]/90
         backdrop-blur-md
         flex-shrink-0
+        dash-header-enter
       "
       aria-label="Dashboard header"
     >

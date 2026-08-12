@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthLayout from "../layouts/AuthLayout";
+import { login } from "../services/authService";
+import { useAuth } from "../contexts/AuthContext";
 
 /* ── Validation ── */
 const validate = {
@@ -141,6 +143,7 @@ function ErrorBanner({ message }) {
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const { signIn } = useAuth();
   const [values, setValues]       = useState({ email: "", password: "" });
   const [errors, setErrors]       = useState({ email: "", password: "" });
   const [touched, setTouched]     = useState({ email: false, password: false });
@@ -175,8 +178,8 @@ export default function LoginPage() {
     setIsLoading(true);
     setFormError("");
     try {
-      // TODO: connect auth API
-      await new Promise((r) => setTimeout(r, 1400));
+      const data = await login({ email: values.email, password: values.password });
+      signIn(data.user);
       navigate("/dashboard");
     } catch {
       setFormError("Invalid email or password. Please try again.");

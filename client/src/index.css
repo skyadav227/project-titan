@@ -318,6 +318,155 @@
   animation: radar-draw 2s ease forwards;
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   TITAN Dashboard — Motion System
+   All animations are purposeful. None exist only for decoration.
+   Timing: fade/translate 150–300ms, numbers 800ms, bars 700ms.
+   ───────────────────────────────────────────────────────────────── */
+
+/* Card entrance — fades up from 16px below */
+@keyframes dashCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Sidebar slide in from left */
+@keyframes sidebarIn {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Header slide down */
+@keyframes headerIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Progress bar fills from the left (no JS needed) */
+@keyframes barFill {
+  from { width: 0%; }
+}
+
+/* Skeleton shimmer sweep */
+@keyframes skeletonSweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Number count-up visual flash */
+@keyframes numReveal {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Dashboard page fade in */
+@keyframes dashPageIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Dashboard card entrance classes ── */
+.dash-card-enter {
+  animation: dashCardIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Stagger: each card in the grid enters slightly later than the previous */
+.dash-card-enter-1  { animation-delay:  40ms; }
+.dash-card-enter-2  { animation-delay:  90ms; }
+.dash-card-enter-3  { animation-delay: 140ms; }
+.dash-card-enter-4  { animation-delay: 190ms; }
+.dash-card-enter-5  { animation-delay: 240ms; }
+.dash-card-enter-6  { animation-delay: 290ms; }
+.dash-card-enter-7  { animation-delay: 340ms; }
+.dash-card-enter-8  { animation-delay: 390ms; }
+.dash-card-enter-9  { animation-delay: 440ms; }
+
+/* Sidebar entrance */
+.dash-sidebar-enter {
+  animation: sidebarIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Header entrance */
+.dash-header-enter {
+  animation: headerIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 60ms;
+}
+
+/* Dashboard page container */
+.dash-page-enter {
+  animation: dashPageIn 0.3s ease both;
+}
+
+/* Number reveal */
+.dash-num-reveal {
+  animation: numReveal 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Progress bars: trigger via CSS — bars animate when their parent is visible.
+   Add this class to the fill div. The `width` must be set inline. */
+.dash-bar-fill {
+  animation: barFill 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 200ms;
+}
+
+/* Skeleton shimmer — matches the SkeletonLoader component's before: approach */
+.dash-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+}
+.dash-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,255,255,0.05) 50%,
+    transparent 100%
+  );
+  animation: skeletonSweep 1.6s ease-in-out infinite;
+}
+
+/* Hover card lift — dashboard specific, lighter than landing page */
+.dash-card-hover {
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.dash-card-hover:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background-color: #161616;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* Button press — all CTA buttons */
+.dash-btn-press {
+  transition: transform 0.12s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.dash-btn-press:hover  { transform: translateY(-1px); }
+.dash-btn-press:active { transform: scale(0.97); }
+
 /* ── Accordion transition ── */
 .accordion-content {
   overflow: hidden;
@@ -458,4 +607,11 @@
 
 .bg-pulse {
   animation: bgPulse 6s ease-in-out infinite;
+}
+
+/* ── Resume Intelligence — indeterminate progress bar ── */
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); width: 40%; }
+  50%  { width: 60%; }
+  100% { transform: translateX(250%); width: 40%; }
 }

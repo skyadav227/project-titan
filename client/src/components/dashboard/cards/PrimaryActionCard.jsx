@@ -21,9 +21,7 @@ import { IconPlay, IconInterview } from "../ui/DashboardIcons";
 
 function FirstTimeActionCard() {
   return (
-    <DashboardCard
-      className="relative overflow-hidden"
-    >
+    <DashboardCard className="relative overflow-hidden" enterIndex={1}>
       {/* Subtle background grid pattern — same as landing page */}
       <div
         className="absolute inset-0 pointer-events-none opacity-[0.025]"
@@ -112,7 +110,7 @@ function ReturningActionCard({ data }) {
   const performance = data.performance;
 
   return (
-    <DashboardCard className="relative overflow-hidden">
+    <DashboardCard className="relative overflow-hidden" enterIndex={1}>
       {/* Subtle background */}
       <div
         className="absolute inset-0 pointer-events-none"

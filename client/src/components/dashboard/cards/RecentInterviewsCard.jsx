@@ -91,7 +91,7 @@ export default function RecentInterviewsCard() {
   const interviews = (data.recentInterviews ?? []).slice(0, 5);
 
   return (
-    <DashboardCard className="flex flex-col gap-4">
+    <DashboardCard className="flex flex-col gap-4" enterIndex={5}>
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex flex-col gap-1">

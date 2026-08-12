@@ -40,7 +40,7 @@ const STEPS = [
 
 export default function InterviewJourneyCard() {
   return (
-    <DashboardCard>
+    <DashboardCard enterIndex={4}>
       {/* Header */}
       <div className="flex flex-col gap-1 mb-5">
         <SectionLabel>How it works</SectionLabel>

@@ -13,6 +13,7 @@ import { Link } from "react-router-dom";
 import { useDashboard } from "../../../contexts/DashboardContext";
 import DashboardCard from "../ui/DashboardCard";
 import SectionLabel from "../ui/SectionLabel";
+import AnimatedBar from "../ui/AnimatedBar";
 import { IconCheck } from "../ui/DashboardIcons";
 
 function ChecklistItem({ item, index }) {
@@ -80,7 +81,7 @@ export default function GettingStartedCard() {
   const progressPct = total > 0 ? Math.round((completedCount / total) * 100) : 0;
 
   return (
-    <DashboardCard>
+    <DashboardCard enterIndex={2}>
       {/* Header */}
       <div className="flex items-start justify-between mb-5">
         <div className="flex flex-col gap-1">
@@ -92,18 +93,16 @@ export default function GettingStartedCard() {
         </span>
       </div>
 
-      {/* Progress bar */}
-      <div
-        className="h-1 rounded-full bg-white/[0.06] mb-5 overflow-hidden"
-        role="progressbar"
-        aria-valuenow={progressPct}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Onboarding progress"
-      >
-        <div
-          className="h-full rounded-full bg-white/60 transition-all duration-500"
-          style={{ width: `${progressPct}%` }}
+      {/* Progress bar — animated */}
+      <div className="mb-5">
+        <AnimatedBar
+          value={progressPct}
+          colorClass="bg-white/60"
+          delay={100}
+          aria-valuenow={progressPct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Onboarding progress"
         />
       </div>
 

@@ -56,6 +56,7 @@ function ActionButton({ label, href, Icon }) {
         transition-all duration-150
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30
         text-center
+        dash-btn-press
       "
       aria-label={label}
     >
@@ -84,7 +85,7 @@ export default function QuickActionsCard() {
   const actions = isFirstTimeUser ? FIRST_TIME_ACTIONS : RETURNING_ACTIONS;
 
   return (
-    <DashboardCard>
+    <DashboardCard enterIndex={6}>
       {/* Header */}
       <div className="flex flex-col gap-1 mb-4">
         <SectionLabel>Navigation</SectionLabel>

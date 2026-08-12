@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Environment — never commit real secrets
+.env
+
+# Uploaded resume files — contain personal user data, must not be committed
+uploads/*
+!uploads/.gitkeep
+
+# Runtime
+*.log
+npm-debug.log*

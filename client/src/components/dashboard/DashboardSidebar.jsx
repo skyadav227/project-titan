@@ -94,6 +94,7 @@ export default function DashboardSidebar() {
         bg-[#0d0d0d]
         border-r border-white/[0.06]
         z-40
+        dash-sidebar-enter
       `}
     >
       {/* ── Logo ── */}

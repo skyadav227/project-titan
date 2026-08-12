@@ -60,7 +60,7 @@ export function DashboardProvider({ children }) {
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
-
+// eslint-disable-next-line react-refresh/only-export-components
 export function useDashboard() {
   const ctx = useContext(DashboardContext);
   if (!ctx) {

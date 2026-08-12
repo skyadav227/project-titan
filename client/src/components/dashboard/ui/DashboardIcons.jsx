@@ -5,30 +5,12 @@
  * Using a single source ensures visual consistency across all components.
  *
  * All icons are 20×20 viewBox by default, drawn with currentColor.
- * Wrapper: pass `className` to the component to control size/color.
+ * Pass `className` to control size and color.
  *
  * Usage:
  *   import { IconInterview } from "./ui/DashboardIcons";
  *   <IconInterview className="w-5 h-5 text-white/50" />
  */
-
-const icon = (path, extra = "") => ({
-  className = "w-5 h-5",
-}) => (
-  <svg
-    className={className}
-    viewBox="0 0 20 20"
-    fill="none"
-    aria-hidden="true"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    {typeof path === "string" ? (
-      <path stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" d={path} />
-    ) : (
-      path
-    )}
-  </svg>
-);
 
 // Navigation
 export const IconDashboard = ({ className = "w-5 h-5" }) => (
