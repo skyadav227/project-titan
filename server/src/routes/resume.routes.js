@@ -23,6 +23,7 @@ const { uploadResume: uploadMiddleware } = require("../middleware/upload");
 const {
   uploadResume,
   getActiveResume,
+  getLatestResume,
   getResumeById,
   getResumeStatus,
   activateResume,
@@ -37,7 +38,8 @@ router.use(requireAuth);
 
 // ── Collection routes ─────────────────────────────────────────────────────────
 router.post("/",       uploadMiddleware, uploadResume);
-router.get("/active",  getActiveResume);
+router.get("/active", getActiveResume);
+router.get("/latest", getLatestResume);
 
 // ── Item routes ───────────────────────────────────────────────────────────────
 router.get   ("/:id",          getResumeById);

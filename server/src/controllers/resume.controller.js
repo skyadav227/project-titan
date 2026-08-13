@@ -161,6 +161,18 @@ async function getActiveResume(req, res, next) {
   }
 }
 
+async function getLatestResume(req, res, next) {
+  try {
+    const doc = await ResumeVersion.findOne({
+      userId: req.user.id,
+    }).sort({ version: -1 });
+
+    return sendSuccess(res, doc ? safeVersion(doc) : null);
+  } catch (err) {
+    return next(err);
+  }
+}
+
 // ── GET /api/resumes/:id ──────────────────────────────────────────────────────
 
 /**
@@ -344,6 +356,7 @@ async function deleteResume(req, res, next) {
 module.exports = {
   uploadResume,
   getActiveResume,
+  getLatestResume,
   getResumeById,
   getResumeStatus,
   activateResume,

@@ -12,9 +12,10 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import {
   getActiveResume,
+  getLatestResume,
   getResumeById,
-  uploadResume as apiUpload,
   getResumeStatus,
+  uploadResume as apiUpload,
   activateResume as apiActivate,
   retryResume as apiRetry,
   deleteResume as apiDelete,
@@ -53,21 +54,48 @@ export function ResumeProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+
   async function restoreFromBackend() {
     try {
-      const data = await getActiveResume();
-      if (!data) {
+      const [latest, active] = await Promise.all([
+        getLatestResume(),
+        getActiveResume(),
+      ]);
+
+      // No resume exists at all.
+      if (!latest && !active) {
+        setResumeVersion(null);
+        setActiveResume(null);
         setUiState("none");
         return;
       }
 
-      // Backend has a version — determine correct UI state
-      applyBackendState(data);
+      // Always restore the currently active resume separately.
+      if (active) {
+        setActiveResume(active);
+      } else {
+        setActiveResume(null);
+      }
+
+      // No latest version but an active resume exists.
+      if (!latest) {
+        setResumeVersion(active);
+        setUiState("active");
+        return;
+      }
+
+      // Latest version is the version whose processing/review state
+      // should determine the current UI.
+      applyBackendState(latest);
     } catch {
-      // If the API fails on load, start in 'none' — don't crash the page
+      // If restoring fails, don't crash the dashboard.
       setUiState("none");
     }
   }
+
+
+
+
 
   function applyBackendState(version) {
     setResumeVersion(version);

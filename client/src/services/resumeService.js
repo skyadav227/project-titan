@@ -26,6 +26,13 @@ export async function getActiveResume() {
 }
 
 /**
+ * Get the user's latest ResumeVersion.
+ */
+export async function getLatestResume() {
+  return apiFetch("/resumes/latest");
+}
+
+/**
  * Get a specific ResumeVersion by ID.
  * @param {string} id
  */
