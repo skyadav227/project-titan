@@ -62,31 +62,64 @@ export function ResumeProvider({ children }) {
         getActiveResume(),
       ]);
 
+      // ─────────────────────────────────────────────────────────────────────
       // No resume exists at all.
+      // ─────────────────────────────────────────────────────────────────────
       if (!latest && !active) {
         setResumeVersion(null);
         setActiveResume(null);
+        setPendingVersionId(null);
+        setError(null);
         setUiState("none");
         return;
       }
 
-      // Always restore the currently active resume separately.
+      // ─────────────────────────────────────────────────────────────────────
+      // Always restore the confirmed active resume.
+      //
+      // IMPORTANT:
+      // A newer failed/processing version must NEVER replace the active
+      // resume in the UI.
+      // ─────────────────────────────────────────────────────────────────────
       if (active) {
         setActiveResume(active);
       } else {
         setActiveResume(null);
       }
 
-      // No latest version but an active resume exists.
-      if (!latest) {
+      // ─────────────────────────────────────────────────────────────────────
+      // If an active resume exists, it is the primary resume state.
+      //
+      // The latest version may be:
+      //   - processing
+      //   - failed
+      //   - ready_for_review
+      //
+      // but it must not hijack the active resume.
+      // ─────────────────────────────────────────────────────────────────────
+      if (active) {
         setResumeVersion(active);
+        setPendingVersionId(null);
+        setProcessingStage(null);
+        setError(null);
         setUiState("active");
         return;
       }
 
-      // Latest version is the version whose processing/review state
-      // should determine the current UI.
-      applyBackendState(latest);
+      // ─────────────────────────────────────────────────────────────────────
+      // No active resume exists.
+      //
+      // Therefore the latest version legitimately determines the current
+      // Resume Intelligence state.
+      // ─────────────────────────────────────────────────────────────────────
+      if (latest) {
+        applyBackendState(latest);
+        return;
+      }
+
+      // Defensive fallback.
+      setResumeVersion(null);
+      setUiState("none");
     } catch {
       // If restoring fails, don't crash the dashboard.
       setUiState("none");
@@ -268,12 +301,18 @@ export function ResumeProvider({ children }) {
 
   const chooseAnotherFile = useCallback(() => {
     stopPolling();
+
     setPendingVersionId(null);
+    setProcessingStage(null);
     setError(null);
     setSelectedFile(null);
+
+    setResumeVersion(activeResume);
     setUiState(activeResume ? "active" : "none");
-    if (activeResume) setIsReplacing(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    if (activeResume) {
+      setIsReplacing(true);
+    }
   }, [activeResume]);
 
   // ── Delete ────────────────────────────────────────────────────────────────

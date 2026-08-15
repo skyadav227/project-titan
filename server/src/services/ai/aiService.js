@@ -5,13 +5,17 @@
  * The rest of the application calls this — never the provider directly.
  * Selecting a different provider means changing this file only.
  *
- * Per the spec: "The rest of the application should request AI functionality
- * through the internal AI service rather than directly calling OpenRouter."
+ * Per the spec and interview-architecture.md §34:
+ *   Controller → Interview Service → AI Service → Provider Adapter → AI Provider
  */
 "use strict";
 
-const { AI_PROVIDER } = require("../../config/env");
+const { AI_PROVIDER, AI_MAX_RETRIES, AI_TIMEOUT_MS } = require("../../config/env");
 const { buildResumeAnalysisPrompt } = require("./prompts/resume/analyzeResume");
+const { buildQuestionGenerationPrompt, parseQuestionGenerationResponse } = require("./prompts/interview/question/generateQuestion");
+const { buildEvaluationPrompt, parseEvaluationResponse } = require("./prompts/interview/evaluation/evaluateAnswer");
+const { buildExplanationPrompt, parseExplanationResponse } = require("./prompts/interview/explanation/generateExplanation");
+const { buildFinalReportPrompt, parseFinalReportResponse } = require("./prompts/interview/finalReport/generateFinalReport");
 
 // Load the configured provider adapter
 function getAdapter() {
@@ -19,6 +23,32 @@ function getAdapter() {
     return require("./providers/openRouterAdapter");
   }
   throw new Error(`Unknown AI_PROVIDER: "${AI_PROVIDER}". Check your .env file.`);
+}
+
+/**
+ * Retry wrapper for transient AI failures.
+ * Bounded retries — never infinite loops.
+ * Per interview-api.md §60, interview-architecture.md §92.
+ *
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries
+ * @returns {Promise<any>}
+ */
+async function withRetry(fn, maxRetries = AI_MAX_RETRIES) {
+  let lastErr;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const retryable = ["AI_NETWORK_ERROR", "AI_PROVIDER_ERROR", "AI_EMPTY_RESPONSE", "AI_INVALID_JSON"].includes(err.code);
+      if (!retryable || attempt === maxRetries) break;
+      const delay = 1000 * attempt; // simple backoff
+      await new Promise(r => setTimeout(r, delay));
+      console.warn(`[aiService] Retry ${attempt}/${maxRetries} after error: ${err.code}`);
+    }
+  }
+  throw lastErr;
 }
 
 /**
@@ -102,4 +132,82 @@ function parseAndValidateAiOutput(raw) {
   return parsed;
 }
 
-module.exports = { analyzeResume };
+// ── Interview Intelligence AI methods ─────────────────────────────────────────
+
+/**
+ * Generate the next interview question.
+ *
+ * @param {object} ctx - Question generation context
+ * @returns {Promise<object>} Validated question generation result
+ */
+async function generateQuestion(ctx) {
+  const adapter = getAdapter();
+  const { systemPrompt, userPrompt } = buildQuestionGenerationPrompt(ctx);
+
+  return withRetry(async () => {
+    const raw = await adapter.generate(systemPrompt, userPrompt, {
+      maxTokens:   800,
+      temperature: 0.7, // variability for question diversity
+    });
+    return parseQuestionGenerationResponse(raw);
+  });
+}
+
+/**
+ * Evaluate a candidate's answer.
+ *
+ * @param {object} ctx - Evaluation context
+ * @returns {Promise<object>} Validated evaluation result
+ */
+async function evaluateAnswer(ctx) {
+  const adapter = getAdapter();
+  const { systemPrompt, userPrompt } = buildEvaluationPrompt(ctx);
+
+  return withRetry(async () => {
+    const raw = await adapter.generate(systemPrompt, userPrompt, {
+      maxTokens:   2000,
+      temperature: 0.1,
+    });
+    return parseEvaluationResponse(raw);
+  });
+}
+
+/**
+ * Generate a contextual concept explanation.
+ *
+ * @param {object} ctx - Explanation context
+ * @returns {Promise<object>} Validated explanation result
+ */
+async function generateExplanation(ctx) {
+  const adapter = getAdapter();
+  const { systemPrompt, userPrompt } = buildExplanationPrompt(ctx);
+
+  return withRetry(async () => {
+    const raw = await adapter.generate(systemPrompt, userPrompt, {
+      maxTokens:   1000,
+      temperature: 0.3,
+    });
+    return parseExplanationResponse(raw);
+  });
+}
+
+/**
+ * Synthesize the final interview master report.
+ *
+ * @param {object} ctx - Aggregated session evidence
+ * @returns {Promise<object>} Validated final report synthesis
+ */
+async function generateFinalReport(ctx) {
+  const adapter = getAdapter();
+  const { systemPrompt, userPrompt } = buildFinalReportPrompt(ctx);
+
+  return withRetry(async () => {
+    const raw = await adapter.generate(systemPrompt, userPrompt, {
+      maxTokens:   2000,
+      temperature: 0.2,
+    });
+    return parseFinalReportResponse(raw);
+  });
+}
+
+module.exports = { analyzeResume, generateQuestion, evaluateAnswer, generateExplanation, generateFinalReport };

@@ -1,1276 +1,1911 @@
 # TITAN — Interview Intelligence PRD
 
-**Document:** Product Requirements Document
-**Module:** Interview Intelligence
+**Document:** `interview-intelligence-prd.md`
 **Product:** TITAN
-**Status:** Pre-Implementation Specification
-**Version:** 1.0
+**Module:** Interview Intelligence
+**Version:** V1
+**Status:** Implementation-Ready Product Definition
 
 ---
 
-# 1. Overview
+# 1. Product Vision
 
-Interview Intelligence is TITAN's adaptive AI interview preparation engine.
-
-It is designed to simulate a realistic interview rather than provide a static question-and-answer experience.
+TITAN Interview Intelligence is a **voice-first AI interview simulator and training system** designed to behave like a capable human interviewer while continuously helping the candidate improve.
 
 The system should:
 
-* understand the user's selected interview context
-* generate relevant questions dynamically
-* listen to each answer
-* evaluate the answer
-* identify correctness, completeness, reasoning quality, communication quality, and weaknesses
-* adapt the next question based on the user's previous response
-* provide actionable feedback after every question
-* allow the user to retry questions after improving
-* provide explanations when the user encounters knowledge gaps
-* progressively adjust question difficulty
-* track measurable improvement throughout the session
-* generate a final master report at the end of the interview
+1. Understand the interview context.
+2. Generate an appropriate interview plan.
+3. Ask relevant questions.
+4. Listen to the candidate's spoken answer.
+5. Transcribe and analyze the answer.
+6. Evaluate the answer using applicable dimensions.
+7. Provide concise, actionable feedback.
+8. Decide whether to retry, explain, follow up, or continue.
+9. Adapt question difficulty and topic selection based on demonstrated performance.
+10. Preserve every attempt and improvement.
+11. Produce a final performance report.
+12. Make historical progress measurable across completed interviews.
 
-The goal is not simply to test the user.
+The core philosophy is:
 
-The goal is to make the user **better at interviewing after every session**.
+> **TITAN should train the candidate, not merely test the candidate.**
 
 ---
 
-# 2. Product Philosophy
+# 2. Problem
 
-Interview Intelligence must feel like an intelligent interviewer and coach rather than an exam platform.
+Most interview-preparation platforms primarily provide:
 
-The experience should follow this principle:
+* predefined questions
+* static answers
+* coding challenges
+* generic AI-generated questions
+* isolated feedback
 
-> **Ask → Listen → Understand → Evaluate → Teach → Adapt → Improve**
+These systems often fail to reproduce the experience of an actual interview.
 
-The system should never feel like:
+A real interview is dynamic.
 
-> Question → Answer → Score → Next Question
+An interviewer may:
 
-Instead, the user should feel that TITAN is actively responding to them.
+* ask a follow-up based on an answer
+* challenge an incorrect assumption
+* ask for clarification
+* change difficulty
+* explore something mentioned by the candidate
+* notice poor communication
+* ask the candidate to explain something differently
+* revisit a weak topic
+* move away from an area that has already been sufficiently covered
 
-For example:
+TITAN should reproduce these behaviors while adding a learning loop that traditional interviews do not provide.
+
+---
+
+# 3. Core Differentiator
+
+TITAN is not:
 
 ```text
 Question
    ↓
-User answers
+Answer
    ↓
-TITAN understands the answer
+Score
    ↓
-Identifies strengths / weaknesses
-   ↓
-Provides feedback
-   ↓
-Determines what the user needs next
-   ↓
-Generates the next question
+Next Question
 ```
 
----
-
-# 3. Problem Statement
-
-Most interview preparation platforms rely heavily on:
-
-* predefined question banks
-* static quizzes
-* fixed interview paths
-* generic explanations
-* isolated scoring
-* limited personalization
-
-These systems can test knowledge but often do not simulate how an actual interviewer behaves.
-
-A real interviewer:
-
-* asks questions based on previous answers
-* asks follow-up questions
-* changes difficulty
-* probes weak areas
-* asks for clarification
-* notices poor communication
-* explains concepts when appropriate
-* evaluates reasoning rather than only final answers
-
-TITAN should reproduce these behaviors through an adaptive AI interview engine.
-
----
-
-# 4. Goals
-
-## 4.1 Primary Goals
-
-Interview Intelligence must:
-
-1. Generate questions dynamically.
-2. Personalize questions according to interview context.
-3. Evaluate every answer.
-4. Provide useful feedback after every answer.
-5. Identify knowledge gaps.
-6. Identify communication problems.
-7. Adapt future questions according to performance.
-8. Allow users to retry questions.
-9. Allow users to request explanations.
-10. Track improvement throughout the session.
-11. Produce a final master report.
-12. Preserve interview history for future progress tracking.
-
----
-
-# 5. Non-Goals for V1
-
-The following are outside the core V1 scope unless explicitly required by implementation planning:
-
-* real-time human interviewer participation
-* live human coaching
-* job application automation
-* automatic job applications
-* guaranteed interview outcome prediction
-* facial/emotion recognition
-* personality diagnosis
-* psychological profiling
-* cheating detection
-* proctoring
-* webcam monitoring
-* external recruiter integration
-
-Voice interaction may be supported by the architecture, but the core interview engine must remain capable of processing text answers.
-
----
-
-# 6. Interview Modes
-
-The user must be able to choose the source of interview context.
-
-## 6.1 Resume-Based
-
-Questions are generated from the user's active resume.
-
-Example:
+TITAN is:
 
 ```text
-Resume:
-React
-Node.js
-MongoDB
-TITAN project
-ShopSphere project
-
-Question:
-"Can you explain how authentication works in your TITAN project?"
+Context
+   ↓
+Question
+   ↓
+Voice Answer
+   ↓
+Transcription
+   ↓
+Evaluation
+   ↓
+Feedback
+   ↓
+Teach / Retry / Adapt
+   ↓
+Follow-up or Next Question
+   ↓
+Measure Improvement
+   ↓
+Continue
+   ↓
+Master Report
 ```
 
-The system should prioritize information actually present in the resume.
+The candidate should feel that TITAN is conducting an actual interview while simultaneously helping them become better at interviewing.
 
 ---
 
-## 6.2 Role-Based
+# 4. Interview Modes
 
-The user selects a target role.
+TITAN supports four primary context sources that may be combined.
+
+## 4.1 Company-Based
+
+The candidate may provide a target company.
+
+Company context may influence:
+
+* relevant technical areas
+* role expectations
+* behavioral areas
+* company-specific information available from trusted sources
+
+TITAN must not claim that a particular question or process is used by a company unless supported by reliable data.
+
+Company-specific information should be treated as contextual guidance rather than guaranteed prediction.
+
+---
+
+## 4.2 Role-Based
+
+The candidate may select a target role.
 
 Examples:
 
-```text
-Frontend Developer
-Backend Developer
-Full Stack Developer
-Software Engineer
-Data Analyst
-```
+* Frontend Developer
+* Backend Developer
+* Full Stack Developer
+* Software Engineer
+* Data Analyst
 
-Questions are generated according to expected knowledge for that role.
+Questions should be generated according to:
 
----
-
-## 6.3 Company-Based
-
-The user selects a company.
-
-The interview should adapt to the company's known interview style, role expectations, and relevant technical/behavioral patterns where reliable information is available.
-
-The system must avoid presenting uncertain company-specific information as fact.
+* role responsibilities
+* expected technical knowledge
+* expected skills
+* experience level
+* interview objective
 
 ---
 
-## 6.4 Job Description-Based
+## 4.3 Job Description-Based
 
-The user provides a job description.
+The candidate may provide a job description.
 
-TITAN extracts relevant:
+TITAN should extract relevant:
 
 * skills
 * technologies
 * responsibilities
 * requirements
-* seniority
-* domain
-* keywords
+* experience expectations
+* domain concepts
 
-and generates interview questions around them.
+The extracted information should influence question generation and topic coverage.
+
+The supplied job description remains part of the interview's historical context.
 
 ---
 
-## 6.5 Mixed Mode
+## 4.4 Resume-Based
 
-The user can combine multiple sources.
+If the candidate has an available resume, TITAN may consume the structured output of Resume Intelligence.
+
+Primary inputs:
+
+```text
+ResumeVersion.candidateProfile
+ResumeVersion.interviewContext
+```
+
+Questions may reference:
+
+* projects
+* technologies
+* skills
+* experience
+* education
+* achievements
+* claimed capabilities
+* career preferences
+
+Example:
+
+> "You mentioned building a MERN application. Why did you choose MongoDB instead of PostgreSQL?"
+
+TITAN must never fabricate experience.
+
+If the resume says the candidate used React but contains no evidence of Redis, TITAN must not state that the candidate used Redis.
+
+---
+
+## 4.5 Mixed Mode
+
+The candidate may combine:
+
+* Company
+* Role
+* Job Description
+* Resume
 
 Example:
 
 ```text
-Resume
-+
-Target Role
-+
-Job Description
-+
-Company
+Company: Google
+Role: Software Engineer
+Resume: Selected ResumeVersion
+Job Description: Provided JD
 ```
 
-The system should prioritize information according to relevance.
-
-Recommended priority:
-
-```text
-Job Description
-      ↓
-Resume
-      ↓
-Target Role
-      ↓
-Company context
-```
-
-The exact prioritization may be adjusted by the interview engine.
+The question engine considers all available context.
 
 ---
 
-# 7. Interview Types
+# 5. Interview Configuration
 
-The user should be able to choose:
+Before starting an interview, TITAN must create an immutable session configuration.
 
-### Technical
+## 5.1 Required Configuration
 
-Focuses on:
-
-* technical knowledge
-* coding concepts
-* architecture
-* debugging
-* APIs
-* databases
-* frameworks
-* tools
-* project implementation
-
-### Behavioral
-
-Focuses on:
-
-* communication
-* teamwork
-* leadership
-* conflict resolution
-* decision making
-* adaptability
-* ownership
-* motivation
-
-### Mixed
-
-Combines technical and behavioral questions.
-
-The engine should control the distribution rather than randomly switching between categories.
-
----
-
-# 8. Interview Difficulty
-
-Supported difficulty levels:
-
-```text
-Easy
-Medium
-Hard
-Adaptive
-```
-
-### Adaptive
-
-This is the recommended/default mode.
-
-Difficulty should change based on demonstrated performance.
-
-Example:
-
-```text
-Strong answer
-    ↓
-Increase difficulty
-
-Weak answer
-    ↓
-Probe / simplify / teach
-
-Improved retry
-    ↓
-Return to appropriate difficulty
-```
-
-The system should avoid punishing users excessively for a single weak answer.
-
----
-
-# 9. Interview Setup
-
-Before starting, the user configures:
-
-* interview mode
+* interview context
+* target role or interview objective
+* experience level
 * interview type
-* target role
-* company, if applicable
-* job description, if applicable
-* resume, if applicable
 * difficulty
-* number of questions and/or duration
-* optional focus areas
+* question count or duration
 
-The system validates the configuration before creating the interview session.
+## 5.2 Optional Configuration
 
----
-
-# 10. Interview Session Lifecycle
-
-The session lifecycle is:
-
-```text
-SETUP
-  ↓
-CREATED
-  ↓
-ACTIVE
-  ↓
-QUESTION
-  ↓
-ANSWER
-  ↓
-EVALUATION
-  ↓
-FEEDBACK
-  ↓
-ADAPTATION
-  ↓
-NEXT QUESTION
-  ↓
-...
-  ↓
-COMPLETED
-  ↓
-FINAL REPORT
-```
-
-A session may also enter:
-
-```text
-PAUSED
-ABANDONED
-```
-
-The system must support recovery after page refresh or temporary connection failure.
-
----
-
-# 11. Dynamic Question Generation
-
-Questions must be generated dynamically.
-
-The system must NOT depend exclusively on a static question bank.
-
-Every generated question should consider:
-
-* interview mode
-* interview type
-* target role
-* resume
+* company
 * job description
-* company context
-* previous questions
-* previous answers
-* previous evaluations
-* current difficulty
-* identified weaknesses
-* identified knowledge gaps
-* previous retries
-* session progress
+* resume
+* interview focus
+
+Supported interview types:
+
+```text
+technical
+behavioral
+mixed
+```
+
+Supported focus areas may include:
+
+```text
+technical
+behavioral
+system design
+project discussion
+HR
+mixed
+```
+
+The selected focus is used by the question-generation and evaluation engines.
 
 ---
 
-# 12. Question Categories
+# 6. Interview Context Snapshot
 
-The engine may generate:
+At session creation, TITAN must capture the context used to generate the interview.
 
-* conceptual questions
-* technical questions
-* project questions
-* resume questions
-* behavioral questions
-* situational questions
-* problem-solving questions
-* debugging questions
-* architecture questions
-* follow-up questions
-* clarification questions
-* knowledge-gap questions
+The session references the originating `ResumeVersion` where applicable but must not depend on the current active resume for historical interpretation.
+
+The session snapshot should contain only the information required for interview context.
+
+Example:
+
+```json
+{
+  "candidateSummary": "Full Stack Developer",
+  "primarySkills": [
+    "JavaScript",
+    "React",
+    "Node.js",
+    "Express",
+    "MongoDB"
+  ],
+  "projects": [
+    "TITAN",
+    "Cortex",
+    "ShopSphere"
+  ],
+  "targetRole": "Full Stack Developer",
+  "experienceLevel": "Fresher"
+}
+```
+
+This ensures that future resume changes do not alter historical interviews.
 
 ---
 
-# 13. Follow-Up Questions
+# 7. Interview Session Lifecycle
 
-Follow-up questions are a core feature.
+The persistent session lifecycle is:
+
+```text
+created
+   ↓
+starting
+   ↓
+active
+   ↓
+completing
+   ↓
+completed
+```
+
+Alternative terminal states:
+
+```text
+active → abandoned
+active → failed
+```
+
+`paused` may be used when the product explicitly supports resumable pausing.
+
+The UI may expose more granular states such as:
+
+```text
+QUESTION
+LISTENING
+PROCESSING
+FEEDBACK
+```
+
+but these are **interaction states**, not replacements for the persistent session lifecycle.
+
+---
+
+# 8. Voice-First Experience
+
+Voice is a core V1 capability.
+
+The candidate should be able to:
+
+1. Start an interview.
+2. Hear the AI interviewer.
+3. Receive a question.
+4. Speak naturally.
+5. Stop speaking manually or through supported speech-end detection.
+6. Submit the answer.
+7. Have the answer processed.
+8. Receive feedback.
+9. Retry, request an explanation, or continue.
+10. Hear the next question.
+
+The experience should feel conversational rather than like a conventional form.
+
+---
+
+# 9. Voice Processing Pipeline
+
+The conceptual pipeline is:
+
+```text
+Question
+   ↓
+Question Text
+   ↓
+Text-to-Speech
+   ↓
+Candidate Hears Question
+   ↓
+Audio Recording
+   ↓
+Speech-to-Text
+   ↓
+Transcript
+   ↓
+Speech / Audio Metrics
+   ↓
+Answer Intelligence
+   ↓
+Structured Analysis
+   ↓
+Feedback
+   ↓
+Decision Engine
+   ↓
+Retry / Explain / Follow-Up / Next Question
+```
+
+Audio binaries must not be stored in MongoDB.
+
+MongoDB stores audio metadata and a storage reference.
+
+---
+
+# 10. Audio Analysis
+
+Where technically reliable, TITAN may analyze:
+
+* response duration
+* speaking pace
+* pause duration
+* filler-word usage
+* hesitation markers
+* speech consistency
+* interruption patterns
+* other observable speech characteristics
+
+Metrics must only be displayed when the underlying processing succeeded.
+
+If a metric is unavailable, TITAN must not invent it.
+
+---
+
+# 11. Confidence Representation
+
+TITAN must **not claim to directly measure psychological confidence**.
+
+Instead, it may identify observable confidence indicators such as:
+
+* hesitation markers
+* long pauses
+* repeated self-corrections
+* uncertain language
+* rushed delivery
+* excessive filler usage
+* low volume where reliably measurable
+
+Preferred language:
+
+> "Your answer contained frequent hesitation markers."
+
+Avoid:
+
+> "You have low confidence."
+
+The distinction between observable speech behavior and psychological interpretation must be maintained throughout the product.
+
+---
+
+# 12. Filler Word Analysis
+
+TITAN should identify common filler words and phrases where supported by transcription/audio analysis.
+
+Examples:
+
+* um
+* uh
+* like
+* basically
+* actually
+* you know
+* I mean
+* so
+
+The system may report:
+
+* total filler count
+* filler frequency
+* most frequent fillers
+* relevant examples
+* improvement suggestions
 
 Example:
 
 ```text
-Interviewer:
-"How did you implement authentication?"
+Filler words: 8
+Most frequent: "like"
 
-User:
-"I used JWT."
-
-TITAN:
-"What happens after the server verifies the JWT?"
+Suggestion:
+Pause briefly when searching for your next thought instead of
+automatically using a filler.
 ```
 
-The second question should be generated because of the first answer.
+---
 
-It should not simply select the next unrelated question.
+# 13. Answer Intelligence
+
+Every completed answer should receive structured analysis.
+
+The evaluation engine must select only the dimensions applicable to the question.
+
+The data model supports the following primary dimensions:
+
+* technical accuracy
+* relevance
+* communication
+* clarity
+* structure
+* completeness
+* confidence indicators
+
+Additional evaluation concepts such as reasoning and technical vocabulary may influence these dimensions or be represented in structured feedback without requiring a separate persistent score in V1.
+
+This prevents the product from creating scores that the persistence layer cannot consistently represent.
 
 ---
 
-# 14. Answer Submission
+# 14. Evaluation Dimensions
 
-The user may provide an answer through supported input methods.
+## 14.1 Technical Accuracy
 
-V1 must support text answers.
+Measures whether the answer is technically correct.
 
-The architecture should remain compatible with future voice-based answers.
+Possible classification:
 
-The submitted answer must be stored as an individual attempt.
+* excellent
+* good
+* mostly correct
+* partially correct
+* incorrect
+* insufficient
 
 ---
 
-# 15. Answer Evaluation
+## 14.2 Relevance
 
-Every answer must be evaluated.
+Measures whether the candidate actually answered the question.
 
-Evaluation should consider:
+A technically correct answer that does not address the question should receive lower relevance.
 
-### Technical Accuracy
+---
 
-Is the information correct?
+## 14.3 Completeness
 
-### Completeness
+Measures whether the candidate covered important expected aspects.
 
-Did the user address the important aspects?
+A candidate does not need to reproduce a perfect reference answer.
 
-### Relevance
+Completeness should be evaluated against the question's expected concepts and context.
 
-Did the answer actually address the question?
+---
 
-### Reasoning
+## 14.4 Reasoning
 
-Did the user demonstrate understanding and reasoning?
+For questions requiring reasoning, TITAN should evaluate:
 
-### Communication
+* logic
+* assumptions
+* trade-offs
+* decision making
+* explanation of why a particular approach was chosen
 
-Was the answer understandable and well structured?
+Reasoning contributes to the answer's overall evaluation where applicable.
 
-### Sentence Quality
+---
 
-Detect significant issues such as:
+## 14.5 Communication
 
-* fragmented sentences
-* unclear wording
+Measures:
+
+* clarity
+* organization
+* conciseness
+* sentence formation
+* unnecessary repetition
+* ability to explain ideas
+
+---
+
+## 14.6 Technical Vocabulary
+
+Where relevant, TITAN may evaluate whether technical terminology is:
+
+* appropriate
+* correctly used
+* sufficiently precise
+
+Incorrect terminology should only reduce evaluation when it materially affects understanding.
+
+---
+
+## 14.7 Answer Structure
+
+For suitable questions, TITAN evaluates whether the response has a useful structure.
+
+Examples:
+
+```text
+Problem
+→ Approach
+→ Implementation
+→ Trade-offs
+→ Result
+```
+
+For behavioral questions, TITAN may recommend STAR-style organization.
+
+Structure should not be penalized merely because the candidate did not explicitly use a named framework.
+
+---
+
+# 15. Answer Quality Classification
+
+The persistent `answerQuality` classification is:
+
+```text
+excellent
+good
+mostly_correct
+partially_correct
+incorrect
+insufficient
+```
+
+This classification is separate from the numerical score.
+
+A numerical score should never be the only representation of answer quality.
+
+---
+
+# 16. Score Rules
+
+All persisted scores use a consistent:
+
+```text
+0–100
+```
+
+scale.
+
+Examples:
+
+```text
+overallScore: 82
+technicalAccuracy: 87
+communication: 74
+structure: 81
+```
+
+The analysis system generates scores.
+
+The frontend must never calculate, modify, or invent scores.
+
+Scores should only be persisted when sufficient evidence exists.
+
+---
+
+# 17. Per-Answer Feedback
+
+After an answer is analyzed, TITAN should provide concise feedback.
+
+Example:
+
+```text
+ANSWER REVIEW
+
+Overall: Mostly Correct
+
+What you did well
+• Correctly explained JWT authentication.
+• Clearly described token-based authentication.
+
+What needs improvement
+• You did not explain token expiration.
+• The explanation became repetitive.
+
+Communication
+• 3 filler words
+• One long hesitation
+• Generally clear delivery
+
+Better approach
+1. Login
+2. Token generation
+3. Client handling
+4. Authorization
+5. Expiration / refresh
+```
+
+An improved example answer may be provided where useful.
+
+Feedback should remain concise and actionable.
+
+---
+
+# 18. Wrong Answer Handling
+
+When an answer is incorrect, TITAN should not simply reveal the correct answer and immediately continue.
+
+The default learning flow is:
+
+```text
+Identify error
+   ↓
+Explain why
+   ↓
+Provide correction
+   ↓
+Suggest improvement
+   ↓
+Offer retry
+```
+
+Example:
+
+> "Your answer is partially incorrect because JWTs are encoded and signed, but they are not inherently encrypted."
+
+The candidate may then retry the question.
+
+---
+
+# 19. Answer Severity
+
+TITAN must distinguish between levels of correctness.
+
+### Correct
+
+The core answer is accurate.
+
+Minor wording issues should not materially reduce the score.
+
+### Mostly Correct
+
+The core concept is correct but an important detail is missing.
+
+### Partially Correct
+
+Some important information is correct, but a significant gap or misconception exists.
+
+### Incorrect
+
+The central concept or conclusion is wrong.
+
+### Insufficient
+
+The response does not contain enough information to evaluate or answer the question meaningfully.
+
+This prevents overly harsh evaluation.
+
+---
+
+# 20. Sentence and Communication Analysis
+
+TITAN should identify communication problems without becoming a generic grammar checker.
+
+Relevant signals include:
+
+* incomplete sentences
+* confusing phrasing
 * excessive repetition
-* poor structure
-* confusing explanations
+* unclear references
+* overly long sentences
+* grammar patterns that materially reduce clarity
 
-Minor natural language imperfections should not be excessively penalized.
+The objective is:
 
----
+> **Interview communication improvement**
 
-# 16. Answer Classification
-
-The engine should classify answers into useful categories.
-
-Examples:
-
-```text
-CORRECT
-PARTIALLY_CORRECT
-INCORRECT
-INCOMPLETE
-IRRELEVANT
-UNCLEAR
-NO_ANSWER
-```
-
-Classification must be accompanied by reasoning and structured evaluation data.
+not English-language examination.
 
 ---
 
-# 17. Per-Question Feedback
+# 21. Answer Attempt Model
 
-After each answer, TITAN should provide concise actionable feedback.
+Every answer is represented by an `AnswerAttempt`.
 
-The feedback should include:
+An attempt belongs to exactly one question.
 
-### What you did well
+```text
+Question 5
+   ├── Attempt 1
+   ├── Attempt 2
+   └── Attempt 3
+```
 
-Specific strengths.
+A retry creates a **new AnswerAttempt**.
 
-### What needs improvement
+The previous attempt must never be overwritten.
 
-Specific weaknesses.
+Each attempt preserves:
 
-### Technical correction
-
-What was incorrect or incomplete.
-
-### How to improve
-
-Concrete advice.
-
-### Better answer
-
-When useful, provide an example of a stronger answer.
-
-The system must not fabricate facts about the user's answer.
+* attempt number
+* retry status
+* processing status
+* audio metadata
+* transcript
+* analysis
+* timestamps
+* optional improvement comparison
 
 ---
 
-# 18. Wrong Answers
+# 22. Retry Rules
 
-If the answer is wrong, TITAN should not simply display:
+Retry is a learning mechanism, not a new interview question.
 
-```text
-Wrong — 3/10
-```
-
-Instead:
+When a candidate retries Question 5:
 
 ```text
-What was wrong
-        ↓
-Why it was wrong
-        ↓
-Correct understanding
-        ↓
-How to answer better
-        ↓
-Optional retry
+Question 5
+   ↓
+Attempt 1
+   ↓
+Feedback
+   ↓
+Retry
+   ↓
+Attempt 2
 ```
 
-The objective is learning, not punishment.
+The question remains the same.
+
+The system must **not create a new `InterviewQuestion` merely because the candidate retried**.
+
+This keeps retries and adaptive follow-up questions conceptually separate.
 
 ---
 
-# 19. Partially Correct Answers
+# 23. Retry Comparison
 
-Partial answers are especially important.
-
-Example:
-
-```text
-Score: 65%
-
-You correctly explained X and Y.
-
-You missed Z.
-
-To make this answer interview-ready:
-...
-```
-
-The user should clearly understand the difference between:
-
-* what they know
-* what they missed
-* what they misunderstood
-
----
-
-# 20. Communication Feedback
-
-TITAN should identify meaningful communication issues.
-
-Examples:
-
-```text
-Your technical explanation was correct, but the answer was difficult to follow because the ideas were presented out of order.
-
-Try:
-
-1. Define the concept.
-2. Explain how it works.
-3. Give an example.
-```
-
-Communication feedback must remain constructive.
-
-The system must not shame the user.
-
----
-
-# 21. Retry Mechanism
-
-After feedback, TITAN should determine whether a retry would be useful.
-
-The system may ask:
-
-> "Would you like to try this question again after improving your answer?"
-
-Possible actions:
-
-```text
-Try Again
-Continue
-```
-
-A retry must create a new answer attempt while preserving the original attempt.
-
-The system should measure improvement.
+After a retry is analyzed, TITAN may compare it with the immediately relevant previous attempt.
 
 Example:
 
 ```text
 Attempt 1
-Score: 52
+Overall: 61
 
-Retry
-Score: 81
-
-Improvement: +29
+Attempt 2
+Overall: 79
 ```
 
----
+Derived improvement information may include:
 
-# 22. Retry Evaluation
-
-A retry should be evaluated independently.
-
-The system should compare:
-
-```text
-Previous attempt
-        vs
-Retry attempt
-```
-
-and identify:
-
-* improvements
-* remaining weaknesses
-* newly introduced errors
-* improvement score
-
----
-
-# 23. Explanation System
-
-If TITAN detects that the user lacks understanding of a relevant concept, it may offer an explanation.
+* score delta
+* communication delta
+* technical delta
+* structure delta
+* improved areas
+* remaining issues
 
 Example:
 
-> "It looks like JWT expiration is unclear here. Would you like me to explain how JWT expiration works before we continue?"
-
-The user may choose:
-
 ```text
-Explain
-Skip
+Improvement: +18 points
+
+Improved:
+• Structure
+• Communication
+
+Still needs work:
+• Technical completeness
 ```
 
-The explanation should be:
+The raw attempts remain the source of truth.
 
-* relevant
-* concise
-* technically accurate
-* appropriate to the user's level
+TITAN must not fabricate improvement percentages.
 
 ---
 
-# 24. Explanation Flow
+# 24. Improvement Threshold
+
+TITAN should not claim meaningful improvement for negligible changes.
+
+The exact threshold belongs to the intelligence layer rather than the frontend.
+
+For example, the analysis system may classify a change as:
 
 ```text
-Knowledge Gap
-      ↓
-TITAN detects gap
-      ↓
-Offers explanation
-      ↓
-User accepts
-      ↓
+meaningful improvement
+minimal change
+decline
+```
+
+The threshold may evolve independently of the UI and database schema.
+
+---
+
+# 25. Explanation Mode
+
+During an interview, the candidate may encounter an unfamiliar concept.
+
+TITAN may offer:
+
+> "Would you like me to explain this concept before continuing?"
+
+The candidate may choose:
+
+```text
+Yes
+No
+```
+
+If requested, TITAN generates a concise explanation appropriate to the candidate's context.
+
+---
+
+# 26. Explanation Rules
+
+Explanations should:
+
+* relate directly to the current question or answer
+* match the candidate's experience level
+* explain only what is necessary
+* use examples when useful
+* avoid unnecessary depth
+* not become a separate course
+
+An explanation may contain:
+
+```text
+Topic
 Explanation
-      ↓
-User continues
-      ↓
-Future question may test the concept
+Key Points
+Related Question
+Trigger
 ```
 
-This allows TITAN to determine whether the user actually improved after learning.
+The explanation should be persisted when required for historical context.
 
 ---
 
-# 25. Adaptive Interview Engine
+# 27. Explanation Lifecycle
 
-The engine should decide what happens after every evaluation.
+An explanation may be triggered by:
 
-Possible decisions:
+```text
+user_request
+system_suggestion
+```
+
+After the explanation:
+
+```text
+Explanation
+   ↓
+Continue
+   OR
+Retry
+```
+
+The candidate should not be forced into a retry unless the interview mode explicitly requires it.
+
+---
+
+# 28. Adaptive Question Engine
+
+The next question must not simply be selected randomly.
+
+The question engine should consider:
+
+* interview context
+* target role
+* interview type
+* current difficulty
+* experience level
+* questions already asked
+* topics covered
+* previous answers
+* answer quality
+* weaknesses
+* strengths
+* retry history
+* previous question relationships
+* interview objectives
+* available remaining question/time budget
+
+The engine should select the next action first and then generate a suitable question when necessary.
+
+---
+
+# 29. Interview Decision Engine
+
+After processing an answer, TITAN should conceptually determine:
 
 ```text
 NEXT_QUESTION
 FOLLOW_UP
 RETRY
 EXPLAIN
-EASIER
-HARDER
-FOCUS_WEAKNESS
+CLARIFY
+END_INTERVIEW
 ```
 
-The decision should be based on:
+The decision should consider both product configuration and observed candidate performance.
 
-* answer quality
-* knowledge gaps
-* communication issues
-* difficulty
-* interview progress
-* previous performance
-* target role requirements
-* remaining question budget
+The decision engine must avoid creating unnecessary loops.
 
 ---
 
-# 26. Difficulty Adaptation
+# 30. Follow-Up Questions
 
-Difficulty should gradually adapt.
+A strong or interesting answer may trigger a deeper follow-up.
+
+Example:
+
+**Question**
+
+> "Explain how you implemented authentication."
+
+**Candidate**
+
+> "I used JWT authentication."
+
+**Follow-up**
+
+> "You mentioned JWT. How did you handle token expiration and authorization?"
+
+The follow-up question is a **new InterviewQuestion**.
+
+It should preserve its relationship to the parent question and the answer attempt that triggered it.
+
+---
+
+# 31. Adaptive Follow-Up Relationship
+
+Adaptive follow-ups should store:
+
+```text
+source: adaptive_follow_up
+parentQuestionId: previous question
+generationContext.previousQuestionId
+generationContext.previousAnswerAttemptId
+generationContext.reason
+```
 
 Example:
 
 ```text
-Strong → harder
-Strong → harder
-
-Weak → follow-up
-Weak → explanation
-
-Improved → medium/harder
+Q3
+ ↓
+Attempt 1
+ ↓
+Analysis identifies missing cache invalidation reasoning
+ ↓
+Q4
 ```
 
-The engine should avoid extreme difficulty changes based on one answer.
+Q4 remains an independent question document while maintaining its parent relationship.
+
+The internal generation reason must not be exposed to the candidate.
 
 ---
 
-# 27. Topic Coverage
+# 32. Weak Answer Handling
 
-The interview engine should maintain topic coverage.
+If the candidate demonstrates weak understanding, TITAN may:
+
+1. ask a simpler clarification question
+2. provide an explanation
+3. offer a retry
+4. revisit the topic later
+5. move to another topic
+
+The system should not endlessly punish the candidate for a single weak answer.
+
+---
+
+# 33. Difficulty Adaptation
+
+V1 supports:
+
+```text
+easy
+medium
+hard
+```
+
+The intelligence layer may internally reason about more granular difficulty, but persisted session/question difficulty should remain within the supported model.
+
+If the candidate consistently performs strongly:
+
+```text
+difficulty ↑
+```
+
+If the candidate struggles:
+
+```text
+difficulty ↓
+```
+
+Difficulty should change gradually.
+
+A single weak answer should not automatically cause a major difficulty drop.
+
+---
+
+# 34. Topic Coverage
+
+TITAN should maintain an internal understanding of:
+
+* topics covered
+* topics not yet covered
+* strengths
+* weaknesses
+* repeated weaknesses
+* relevant concepts mentioned by the candidate
+* topics requiring follow-up
+
+This prevents unnecessary repetition and improves interview coverage.
+
+The database does not need a separate topic-tracking collection in V1.
+
+Topic state may be derived from questions and answer analyses until future analytics justify dedicated persistence.
+
+---
+
+# 35. Question Numbering
+
+`questionNumber` identifies the logical position of a question within a session.
+
+The combination:
+
+```text
+sessionId + questionNumber
+```
+
+must be unique.
+
+Retries do **not** consume a new question number.
+
+Adaptive follow-ups are new questions and therefore receive their own question number.
 
 Example:
 
 ```text
-JavaScript       ✓
-React            ✓
-Node.js          ✓
-MongoDB          ✓
-Authentication   ⚠ weak
-System Design    ○ not tested
+Q1 → Attempt 1
+Q2 → Attempt 1
+Q3 → Attempt 1
+Q4 → Follow-up to Q3
+Q5 → Attempt 1
 ```
 
-The engine should balance:
-
-* required topics
-* weak topics
-* uncovered topics
-* interview time
+The question number represents interview progression, not the retry count.
 
 ---
 
-# 28. Progress Tracking
+# 36. Interview Progress
 
-The system should track measurable progress during the session.
+The session maintains:
 
-Possible metrics:
+```text
+currentQuestionNumber
+questionsCompleted
+totalQuestions
+attemptsCount
+retryCount
+```
 
-* overall performance
-* technical accuracy
-* communication
-* completeness
-* reasoning
-* confidence proxy based on answer behavior
-* topic mastery
-* retry improvement
-* knowledge gaps resolved
+These are operational session-progress values.
 
-Metrics must be based on observable interview data.
+They should be updated by backend services rather than calculated by the frontend.
 
-The system must not claim to directly measure psychological confidence unless a reliable measurement mechanism exists.
+Retries increment:
 
----
+```text
+attemptsCount
+retryCount
+```
 
-# 29. Confidence
+but do not increment:
 
-TITAN may provide a **confidence indicator** based on observable behavior such as:
+```text
+questionsCompleted
+```
 
-* answer completeness
-* hesitation markers, if voice data is available
-* consistency
-* retry improvement
-* willingness to attempt difficult questions
-
-However, it must be clearly presented as an estimate.
-
-It must never claim:
-
-> "Your psychological confidence is 83%."
-
-Instead:
-
-> "Interview confidence indicator: improving"
+unless product logic defines the question as completed after the retry decision.
 
 ---
 
-# 30. Final Master Report
+# 37. Session Recovery
 
-At session completion, TITAN generates one final performance report.
+The system must support recovery after browser refresh or temporary interruption.
 
-The report must focus on useful performance information.
+Required persistent state includes:
 
-It should include:
+* session status
+* current question
+* question status
+* completed question count
+* latest answer attempt
+* processing status
+* last activity timestamp
+
+Recovery flow:
+
+```text
+GET active session
+      ↓
+Restore session state
+      ↓
+Determine recoverable interaction state
+      ↓
+Continue interview
+```
+
+The backend must determine the authoritative recoverable state.
+
+The client must not invent session state.
+
+---
+
+# 38. Processing Failure Handling
+
+Individual processing failures must not automatically fail the entire interview.
+
+Example:
+
+```text
+Answer uploaded
+      ↓
+Transcription failed
+      ↓
+Retry processing
+      ↓
+Continue
+```
+
+A session should become `failed` only when the system cannot safely recover or continue.
+
+Processing failures should be observable internally for debugging and recovery.
+
+---
+
+# 39. Session Completion Rules
+
+A session may reach its configured completion boundary because:
+
+* configured question count is reached
+* configured duration is reached
+* candidate explicitly ends the interview
+* the interview engine determines sufficient coverage has been achieved
+
+However, reaching the final question does **not** immediately mark the session as completed.
+
+The finalization sequence is:
+
+```text
+active
+   ↓
+final question answered
+   ↓
+final answer analysis succeeds
+   ↓
+completing
+   ↓
+session-level analysis generated
+   ↓
+final report persisted
+   ↓
+completed
+```
+
+The report must exist before the session is considered successfully completed.
+
+---
+
+# 40. Abandoned Sessions
+
+A candidate may leave an interview before completion.
+
+The session may become:
+
+```text
+abandoned
+```
+
+Abandonment must not automatically delete:
+
+* questions
+* answer attempts
+* transcripts
+* analyses
+* audio references
+* available reports
+
+Historical data remains intact unless explicit deletion behavior is introduced.
+
+---
+
+# 41. Final Master Report
+
+Every successfully completed interview should produce a persisted final report.
+
+The report should summarize:
 
 ## Overall Performance
 
-```text
-Overall Score
-Technical Score
-Communication Score
-Reasoning Score
-Completeness Score
-```
+* overall score
+* technical accuracy
+* communication
+* clarity
+* structure
+* confidence indicators
+* relevance
 
-## Strengths
+## Technical Performance
 
-The user's strongest areas.
+* strongest areas
+* weakest areas
+* knowledge gaps
+* technical accuracy
 
-## Weaknesses
+## Communication Performance
 
-The user's most important weaknesses.
+* clarity
+* structure
+* filler frequency where available
+* speaking pace where available
+* hesitation indicators where available
+* sentence quality
 
-## Knowledge Gaps
+## Answer Performance
 
-Topics that require further study.
+* strongest answers
+* weaker answers
+* partially correct answers
+* improved retry attempts
 
-## Communication Issues
+## Progress During Session
 
-Important communication improvements.
-
-## Improvement During Session
-
-Show measurable progress.
-
-Example:
-
-```text
-First 3 questions: 61%
-Last 3 questions: 78%
-
-Session improvement: +17%
-```
-
-## Retry Improvements
-
-Show meaningful improvements from retries.
-
-## Recommended Next Steps
-
-Only a few high-value recommendations.
-
----
-
-# 31. Progress Across Sessions
-
-TITAN should preserve completed interview results.
-
-Future versions should allow comparison between sessions.
+Where enough data exists, compare earlier and later performance.
 
 Example:
 
 ```text
-Interview #1
-Technical: 61
+Beginning → End
 
-Interview #2
-Technical: 69
-
-Interview #3
-Technical: 78
+Technical accuracy   62 → 81
+Structure            55 → 78
+Communication        68 → 82
+Filler frequency      9 → 4
 ```
 
-The product should make progress visible.
-
-The user should feel:
-
-> "I am becoming better at interviews."
+Only metrics supported by collected evidence may be displayed.
 
 ---
 
-# 32. Resume Intelligence Integration
+# 42. Final Report Question Breakdown
 
-Interview Intelligence must integrate with Resume Intelligence.
-
-Resume Intelligence already produces:
+The final report should preserve a compact breakdown of each logical question:
 
 ```text
-ResumeVersion
-    ↓
-candidateProfile
-    ↓
-interviewContext
+questionId
+bestScore
+attempts
+improved
 ```
 
-The interview engine should consume the existing `interviewContext` rather than independently rebuilding the candidate profile.
+This allows the UI to answer:
 
-This prevents duplicated processing and inconsistent candidate information.
+* which questions were difficult?
+* which questions were retried?
+* which questions improved?
+* what was the candidate's best performance?
+
+The report should reference the persisted question/attempt data rather than duplicate complete answer data.
 
 ---
 
-# 33. Resume Version Integrity
+# 43. Final Recommendations
 
-An interview must record which resume version was used.
+The report should provide a small number of high-value recommendations.
 
 Example:
 
 ```text
-Interview Session
-        ↓
-ResumeVersion V3
+TOP IMPROVEMENT AREAS
+
+1. Strengthen database indexing concepts.
+2. Reduce filler words during technical explanations.
+3. Structure project answers more clearly.
+4. Practice explaining technical trade-offs.
 ```
 
-If the user later uploads V4, historical interviews using V3 must remain associated with V3.
+Avoid generic recommendations such as:
 
-Historical interview results must not silently change because the active resume changed.
+> "Practice more."
 
----
-
-# 34. Job Description Integration
-
-When a job description is supplied, the system should extract:
-
-* role
-* required skills
-* preferred skills
-* responsibilities
-* technologies
-* experience requirements
-* domain
-* important keywords
-
-These become interview context.
+Recommendations must be grounded in observed session performance.
 
 ---
 
-# 35. Company Context
+# 44. Historical Progress
 
-Company-specific context must be treated carefully.
+Completed final reports become the source of historical interview progress.
 
-If reliable information is unavailable, TITAN should generate generally relevant questions rather than inventing company-specific interview behavior.
-
-The system must avoid hallucinating:
-
-* interview rounds
-* company policies
-* internal technologies
-* recruiter behavior
-* confidential information
-
----
-
-# 36. AI Responsibilities
-
-AI may be responsible for:
-
-* question generation
-* answer evaluation
-* feedback generation
-* explanation generation
-* adaptive reasoning
-* final report generation
-
-However, deterministic application logic should remain responsible for:
-
-* authentication
-* authorization
-* session ownership
-* persistence
-* session state
-* retry counting
-* question numbering
-* limits
-* lifecycle transitions
-* data validation
-
-AI output must be validated before persistence.
-
----
-
-# 37. Structured AI Output
-
-AI responses must use structured schemas.
-
-The application must not depend on parsing arbitrary natural-language AI responses.
-
-For example:
+Example:
 
 ```text
-AI
- ↓
-Structured JSON
- ↓
-Schema validation
- ↓
-Application logic
- ↓
-MongoDB
+Session 1
+Overall: 71
+
+Session 2
+Overall: 77
+
+Session 3
+Overall: 83
 ```
 
-Invalid AI output must be handled safely.
+No separate progress collection is required for V1.
+
+Historical progress should be derived from persisted final reports.
+
+This prevents duplicate sources of truth.
 
 ---
 
-# 38. Error Handling
+# 45. Progress Integrity
 
-The interview should survive:
+TITAN must never manufacture progress.
 
-* AI provider failure
-* malformed AI response
-* network interruption
-* browser refresh
-* duplicate answer submission
-* expired session
-* server restart
+Progress may only be shown when supported by:
 
-The user should never lose a completed answer because of a temporary AI failure.
+* analyzed attempts
+* persisted scores
+* measurable communication data
+* completed reports
+* actual retry comparisons
+
+Unavailable data must remain unavailable.
 
 ---
 
-# 39. Session Recovery
+# 46. AI Metadata
 
-If the user refreshes the page:
+Internal AI metadata may be persisted for debugging, evaluation, and cost tracking.
+
+Examples:
 
 ```text
-Frontend
-   ↓
-GET current session
-   ↓
-Backend restores state
-   ↓
-Frontend resumes
+provider
+model
+promptVersion
+analysisVersion
+generatedAt
+latencyMs
+tokenUsage
 ```
 
-The system must know:
+AI metadata is internal and must not be exposed as normal user-facing interview feedback.
 
-* current question
-* previous answers
-* current evaluation
-* retry state
-* session status
-* remaining questions
-* accumulated performance
+The metadata should be structured so that AI providers and models can be changed without changing the user-facing data model.
 
 ---
 
-# 40. Security
+# 47. Anti-Fabrication Rules
 
-Every interview endpoint must require authentication.
+TITAN must never:
 
-Every interview resource must be scoped to the authenticated user.
+* invent resume experience
+* claim the candidate used an unmentioned technology
+* fabricate performance metrics
+* fabricate audio metrics
+* claim psychological states as facts
+* invent improvement percentages
+* claim unsupported company-specific interview patterns
+* present unavailable information as measured data
+* modify historical attempts to make progress appear better
 
-A user must never be able to access another user's:
-
-* sessions
-* questions
-* answers
-* evaluations
-* reports
-
-by manipulating IDs.
-
-Job descriptions and user-provided content must be treated as untrusted input.
+Unknown data must be represented as unavailable.
 
 ---
 
-# 41. Data Integrity
+# 48. AI Interviewer Personality
 
-The system must preserve:
+The interviewer should feel:
 
-```text
-Session
-  ↓
-Question
-  ↓
-Attempt
-  ↓
-Evaluation
-```
+* professional
+* conversational
+* attentive
+* adaptive
+* challenging when appropriate
+* encouraging without being artificial
 
-Historical evaluations must never be overwritten by later retries.
+It should not feel:
 
-A retry creates another attempt.
+* robotic
+* excessively cheerful
+* insulting
+* overly verbose
+* artificially motivational
 
-A completed report should remain reproducible from stored session data.
-
----
-
-# 42. Performance Requirements
-
-The interview experience should feel responsive.
-
-The system should:
-
-* return deterministic state quickly
-* process AI operations asynchronously where appropriate
-* minimize unnecessary repeated context
-* avoid sending the entire session history to the AI when unnecessary
-* maintain a compact interview context
-* control token usage
+TITAN should behave more like a competent human interviewer than a chatbot.
 
 ---
 
-# 43. AI Context Management
+# 49. Interviewer Behavior Rules
 
-The AI should receive only relevant context.
+TITAN should:
 
-Context may include:
-
-```text
-Candidate context
-+
-Interview configuration
-+
-Current topic
-+
-Relevant previous questions
-+
-Relevant previous answers
-+
-Recent evaluations
-+
-Known weaknesses
-+
-Topic coverage
-```
-
-The entire historical transcript should not automatically be sent on every request.
+* ask one primary question at a time
+* listen before evaluating
+* maintain conversation context
+* use follow-ups naturally
+* avoid repeating already answered questions
+* challenge strong candidates
+* support struggling candidates
+* recognize measurable improvement
+* maintain interview continuity
+* respect the configured interview objective
+* avoid unnecessarily extending the interview
 
 ---
 
-# 44. User Experience Principles
+# 50. Feedback Personality
 
-The experience must be:
-
-### Adaptive
-
-The interview reacts to the user.
-
-### Educational
-
-Every mistake becomes a learning opportunity.
-
-### Measurable
-
-The user can see improvement.
+Feedback should be:
 
 ### Honest
 
-No fabricated scores or claims.
+Do not inflate performance.
 
-### Encouraging
+### Constructive
 
-Feedback should build confidence without giving empty praise.
+Explain how the candidate can improve.
 
-### Focused
+### Specific
 
-Avoid unnecessary UI and excessive text.
+Reference the actual answer.
 
----
+### Concise
 
-# 45. Success Criteria
+Do not turn every answer into a long lecture.
 
-Interview Intelligence V1 is successful when a user can:
+### Progressive
 
-1. Create an interview.
-2. Select interview context.
-3. Start an interview.
-4. Receive a dynamically generated question.
-5. Submit an answer.
-6. Receive structured evaluation.
-7. Understand what they did well.
-8. Understand what they did poorly.
-9. Receive actionable improvement advice.
-10. Retry a question.
-11. See measurable retry improvement.
-12. Receive an explanation when appropriate.
-13. Continue through adaptive questions.
-14. Complete the session.
-15. Receive a final master report.
-16. Refresh the page without losing session state.
-17. Review previous interview performance.
+Help the candidate improve during the interview rather than only at the end.
 
 ---
 
-# 46. Core Product Differentiator
+# 51. Resume Intelligence Integration
 
-Interview Intelligence must not become another AI question generator.
+Interview Intelligence consumes Resume Intelligence output.
 
-Its core differentiator is:
-
-> **TITAN remembers how you answered, understands where you struggled, teaches you when necessary, adapts the interview around you, and measures whether you actually improved.**
-
-The product loop is:
+Primary inputs:
 
 ```text
-             ┌─────────────────────┐
-             │      QUESTION       │
-             └──────────┬──────────┘
-                        ↓
-             ┌─────────────────────┐
-             │       ANSWER        │
-             └──────────┬──────────┘
-                        ↓
-             ┌─────────────────────┐
-             │     EVALUATION      │
-             └──────────┬──────────┘
-                        ↓
-             ┌─────────────────────┐
-             │      FEEDBACK       │
-             └──────────┬──────────┘
-                        ↓
-              ┌─────────┴─────────┐
-              ↓                   ↓
-          KNOWLEDGE GAP        WEAKNESS
-              ↓                   ↓
-          EXPLAIN              RETRY
-              ↓                   ↓
-              └─────────┬─────────┘
-                        ↓
-                 ADAPTIVE ENGINE
-                        ↓
-                  NEXT QUESTION
-                        ↓
-                       ...
-                        ↓
-                 MASTER REPORT
-                        ↓
-                   PROGRESS
+ResumeVersion.candidateProfile
+ResumeVersion.interviewContext
 ```
 
-This loop is the foundation of TITAN Interview Intelligence.
+When a resume is selected, the session stores:
+
+```text
+resumeVersionId
+```
+
+The interview also stores a session-level context snapshot.
+
+This provides:
+
+```text
+ResumeVersion
+     ↓
+Interview context generation
+     ↓
+Session snapshot
+     ↓
+Interview questions
+```
+
+Future resume changes therefore do not alter completed interviews.
+
+---
+
+# 52. Context Construction
+
+The interview engine should construct a normalized context containing:
+
+```text
+candidate
+targetRole
+experienceLevel
+company
+jobDescription
+resumeProfile
+resumeInterviewContext
+interviewFocus
+difficulty
+sessionGoals
+```
+
+Not every field is required for every interview mode.
+
+The normalized context is used for question generation and evaluation.
+
+---
+
+# 53. Security and Ownership
+
+All interview-related persistent entities must belong to an authenticated user.
+
+Ownership applies to:
+
+* sessions
+* questions
+* attempts
+* reports
+* transcripts
+* recordings
+* explanations
+* performance data
+
+Authorization must always be enforced server-side.
+
+A client-provided document ID is never sufficient authorization.
+
+Example:
+
+```js
+InterviewQuestion.findOne({
+  _id: req.params.id,
+  userId: req.user.id
+});
+```
+
+Where ownership is inherited through a parent session, the backend must still verify the session belongs to the authenticated user.
+
+---
+
+# 54. Privacy
+
+Interview data may contain sensitive personal information.
+
+The system should:
+
+* protect transcripts
+* protect resume-derived data
+* protect job descriptions
+* protect audio
+* avoid exposing storage references
+* avoid exposing internal prompts
+* avoid exposing AI metadata unnecessarily
+* avoid unnecessary data retention
+* support future deletion policies
+
+Clients should receive authorized audio access mechanisms rather than raw storage paths where applicable.
+
+---
+
+# 55. Audio Retention
+
+Audio retention must remain configurable.
+
+Possible future policies:
+
+```text
+Keep audio
+Delete after transcription
+Delete after analysis
+Delete after session completion
+User-controlled deletion
+```
+
+Deleting audio must not require deletion of:
+
+* transcript
+* answer analysis
+* final report
+
+unless the user explicitly requests full data deletion.
+
+---
+
+# 56. Deletion Behavior
+
+V1 should preserve historical integrity.
+
+Deleting a session should therefore not silently cascade into permanent deletion unless explicit product behavior exists.
+
+Future deletion may involve:
+
+```text
+Session
+   ↓
+Questions
+   ↓
+Attempts
+   ↓
+Audio
+   ↓
+Reports
+```
+
+External object storage must be included in any permanent deletion workflow.
+
+---
+
+# 57. Data Model Alignment
+
+The Interview Intelligence product behavior maps to the persistence layer as follows:
+
+```text
+InterviewSession
+    ↓
+InterviewQuestion
+    ↓
+AnswerAttempt
+    ↓
+Transcript
+    ↓
+Answer Analysis
+    ↓
+Retry / Follow-up Decision
+    ↓
+Next InterviewQuestion
+    ↓
+FinalReport
+```
+
+Important distinction:
+
+```text
+Retry
+    = new AnswerAttempt
+
+Follow-up
+    = new InterviewQuestion
+```
+
+This distinction is fundamental to V1.
+
+---
+
+# 58. V1 Scope
+
+V1 includes:
+
+* voice-based interviews
+* speech-to-text
+* AI-generated questions
+* dynamic follow-up questions
+* resume-based interviews
+* role-based interviews
+* company-based interviews
+* JD-based interviews
+* mixed interviews
+* structured per-answer evaluation
+* communication analysis
+* filler analysis where supported
+* observable confidence indicators
+* retry mechanism
+* retry comparison
+* explanation mechanism
+* adaptive difficulty
+* session recovery
+* final master report
+* historical session progress
+* structured AI metadata
+* interview context snapshots
+
+---
+
+# 59. V1 Exclusions
+
+The following are explicitly excluded from V1:
+
+* facial emotion detection
+* eye tracking
+* biometric emotion analysis
+* lie detection
+* personality diagnosis
+* psychological profiling
+* automated hiring decisions
+* guaranteed company interview prediction
+* real-time emotional-state classification
+* webcam analysis
+* recruiter access
+* multiplayer interviews
+* leaderboards
+* badges
+* achievements
+* social profiles
+
+---
+
+# 60. Future Extension Points
+
+The architecture should allow future additions without breaking the V1 model:
+
+* video interviews
+* advanced speech analytics
+* body-language analysis
+* interviewer personas
+* interview templates
+* company-specific interview tracks
+* long-term skill progression
+* personalized learning plans
+* advanced interview-history analytics
+
+Future capabilities must extend the existing entities rather than invalidate the V1 learning loop.
+
+---
+
+# 61. Success Criteria
+
+TITAN Interview Intelligence is successful when a candidate can complete an interview and understand:
+
+1. What they know.
+2. What they do not know.
+3. How well they communicate.
+4. Which answers were weak.
+5. Why those answers were weak.
+6. How to improve them.
+7. Whether they actually improved.
+8. What they should practice next.
+
+The final experience should leave the candidate thinking:
+
+> **"I know exactly where I improved and exactly what I need to work on next."**
+
+rather than:
+
+> "I completed another AI interview."
+
+---
+
+# 62. Core Product Loop
+
+The entire Interview Intelligence module is:
+
+```text
+PERSONALIZE
+     ↓
+ASK
+     ↓
+LISTEN
+     ↓
+TRANSCRIBE
+     ↓
+UNDERSTAND
+     ↓
+EVALUATE
+     ↓
+FEEDBACK
+     ↓
+TEACH
+     ↓
+RETRY / ADAPT
+     ↓
+ASK BETTER QUESTION
+     ↓
+MEASURE PROGRESS
+     ↓
+MASTER REPORT
+```
+
+This loop is the foundation for the Interview Intelligence user flow, wireframes, UI specification, API specification, AI specification, and implementation plan.
+
+---
+
+# 63. Definition of Done
+
+The Interview Intelligence PRD is implementation-ready when:
+
+* [ ] Interview modes are defined.
+* [ ] Interview configuration is defined.
+* [ ] Resume integration is defined.
+* [ ] Historical context snapshot behavior is defined.
+* [ ] Voice-first interaction is defined.
+* [ ] Audio processing behavior is defined.
+* [ ] Transcript behavior is defined.
+* [ ] Answer evaluation dimensions are defined.
+* [ ] Answer quality classification is defined.
+* [ ] Score rules are defined.
+* [ ] Feedback behavior is defined.
+* [ ] Wrong-answer behavior is defined.
+* [ ] Retry behavior is defined.
+* [ ] Retry vs follow-up distinction is defined.
+* [ ] Adaptive question behavior is defined.
+* [ ] Difficulty adaptation is defined.
+* [ ] Explanation behavior is defined.
+* [ ] Session recovery is defined.
+* [ ] Processing failure behavior is defined.
+* [ ] Session completion behavior is defined.
+* [ ] Abandoned session behavior is defined.
+* [ ] Final report behavior is defined.
+* [ ] Historical progress behavior is defined.
+* [ ] Anti-fabrication rules are defined.
+* [ ] Security and ownership rules are defined.
+* [ ] Privacy and audio retention behavior are defined.
+* [ ] V1 exclusions are defined.
+* [ ] Future extension points are defined.
+* [ ] Product behavior is aligned with the Interview Data Model.
+
+---
+
+# 64. Core Product Principle
+
+TITAN must preserve the complete learning journey:
+
+```text
+What was asked
+      ↓
+What the candidate said
+      ↓
+How the candidate performed
+      ↓
+What was wrong
+      ↓
+What TITAN explained
+      ↓
+How the candidate retried
+      ↓
+Whether the candidate improved
+      ↓
+How the candidate performed overall
+      ↓
+What the candidate should practice next
+```
+
+The product therefore represents **progress, not merely answers**.
+
+That is what makes TITAN an interview improvement system rather than another AI question-generation platform.

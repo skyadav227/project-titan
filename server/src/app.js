@@ -16,8 +16,9 @@
 
 const express      = require("express");
 const cors         = require("cors");
-const authRoutes   = require("./routes/auth.routes");
-const resumeRoutes = require("./routes/resume.routes");
+const authRoutes      = require("./routes/auth.routes");
+const resumeRoutes    = require("./routes/resume.routes");
+const interviewRoutes = require("./routes/interview.routes");
 const { errorHandler } = require("./middleware/errorHandler");
 
 const app = express();
@@ -56,8 +57,9 @@ app.get("/health", (_req, res) => {
 });
 
 // ── API routes ────────────────────────────────────────────────────────────────
-app.use("/api/auth",    authRoutes);
-app.use("/api/resumes", resumeRoutes);
+app.use("/api/auth",       authRoutes);
+app.use("/api/resumes",    resumeRoutes);
+app.use("/api/interviews", interviewRoutes);
 
 // ── 404 — unmatched routes ────────────────────────────────────────────────────
 app.use((_req, res) => {
