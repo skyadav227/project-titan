@@ -96,6 +96,30 @@ export function submitAnswer(sessionId, questionId, { audioBlob, durationMs, ide
 }
 
 /**
+ * Submit a text answer for a question (bypasses STT; used for dev/integration testing).
+ * POST /api/interviews/:id/questions/:questionId/answers
+ *
+ * Sends multipart/form-data with a `text` field instead of audio.
+ * The backend uses the text directly as the transcript and routes it straight
+ * to AI evaluation — no OpenAI Whisper key required.
+ */
+export function submitTextAnswer(sessionId, questionId, { text, idempotencyKey }) {
+  const formData = new FormData();
+  formData.append("text", text);
+
+  const headers = {};
+  if (idempotencyKey) {
+    headers["Idempotency-Key"] = idempotencyKey;
+  }
+
+  return apiFetch(`/interviews/${sessionId}/questions/${questionId}/answers`, {
+    method: "POST",
+    body: formData,
+    headers,
+  });
+}
+
+/**
  * Poll answer processing status.
  * GET /api/interviews/:id/answers/:answerAttemptId
  */

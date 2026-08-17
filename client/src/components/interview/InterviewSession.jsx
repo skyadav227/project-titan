@@ -20,7 +20,7 @@
  * This component does NOT contain business logic — it delegates everything
  * to InterviewContext and sub-components.
  */
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useInterview } from "../../contexts/InterviewContext";
 import VoiceRecorder    from "./VoiceRecorder";
 import AnswerReport     from "./AnswerReport";
@@ -181,6 +181,73 @@ function QuestionDisplay({ question, isRetry, retryInfo }) {
   );
 }
 
+// ── Text answer panel (dev / integration-test path) ──────────────────────────
+// Shown below the VoiceRecorder when microphone STT is not configured.
+// Uses the text directly as the transcript and routes through AI evaluation.
+// Clearly labelled so it is never mistaken for the production voice interface.
+function TextAnswerPanel({ onSubmit, isLoading, disabled }) {
+  const [text, setText] = useState("");
+  const MIN_CHARS = 10;
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    const trimmed = text.trim();
+    if (trimmed.length < MIN_CHARS) return;
+    onSubmit(trimmed);
+    setText("");
+  }
+
+  const remaining = MIN_CHARS - text.trim().length;
+  const isValid   = text.trim().length >= MIN_CHARS;
+
+  return (
+    <DashboardCard className="mt-3 dash-card-enter">
+      {/* Dev-mode label — clearly distinguishes this from the production voice UI */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-yellow-400/60 border border-yellow-500/20 rounded px-2 py-0.5">
+          Text mode
+        </span>
+        <span className="text-xs text-white/25">
+          Type your answer (no microphone required)
+        </span>
+      </div>
+
+      <form onSubmit={handleSubmit} noValidate>
+        <textarea
+          rows={4}
+          value={text}
+          onChange={e => setText(e.target.value)}
+          disabled={isLoading || disabled}
+          placeholder="Type your answer here…"
+          aria-label="Type your interview answer"
+          className="
+            w-full bg-white/[0.03] border border-white/[0.08] rounded-lg
+            px-3 py-2.5 text-sm text-white/80 placeholder-white/20
+            resize-none focus:outline-none focus:border-white/20
+            disabled:opacity-40 disabled:cursor-not-allowed
+          "
+        />
+        <div className="flex items-center justify-between mt-2">
+          <span className={`text-xs ${isValid ? "text-white/25" : "text-white/35"}`}>
+            {isValid
+              ? `${text.trim().length} characters`
+              : `${remaining} more character${remaining === 1 ? "" : "s"} needed`}
+          </span>
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            disabled={!isValid || isLoading || disabled}
+            isLoading={isLoading}
+          >
+            Submit Answer
+          </Button>
+        </div>
+      </form>
+    </DashboardCard>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function InterviewSession() {
   const {
@@ -193,6 +260,7 @@ export default function InterviewSession() {
     error,
     isLoading,
     submitVoiceAnswer,
+    submitTextAnswerAction,
     continueToNext,
     retryCurrentQuestion,
     requestConceptExplanation,
@@ -205,11 +273,15 @@ export default function InterviewSession() {
 
   const handleRecordingComplete = useCallback(({ audioBlob, durationMs }) => {
     const key = getKey();
-    // submitVoiceAnswer is async but we don't await here — it updates context state internally
-    // Reset idempotency key after a short delay to allow the call to complete
     submitVoiceAnswer({ audioBlob, durationMs, idempotencyKey: key });
     setTimeout(resetKey, 5000);
   }, [submitVoiceAnswer, getKey, resetKey]);
+
+  const handleTextSubmit = useCallback((text) => {
+    const key = getKey();
+    submitTextAnswerAction({ text, idempotencyKey: key });
+    setTimeout(resetKey, 5000);
+  }, [submitTextAnswerAction, getKey, resetKey]);
 
   // ── Error state ────────────────────────────────────────────────────────────
   if (uiState === "error") {
@@ -303,6 +375,13 @@ export default function InterviewSession() {
           disabled={isLoading || !question?.id}
         />
       </DashboardCard>
+
+      {/* Text answer panel — dev/integration-test path (no STT required) */}
+      <TextAnswerPanel
+        onSubmit={handleTextSubmit}
+        isLoading={isLoading}
+        disabled={!question?.id}
+      />
 
       {/* End interview */}
       <div className="mt-4 flex justify-end">

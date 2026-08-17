@@ -68,8 +68,8 @@ async function getCurrentQuestion(req, res, next) {
 // ── POST /api/interviews/:id/questions/:questionId/answers ────────────────────
 async function submitAnswer(req, res, next) {
   try {
-    const { durationMs } = req.body;
-    const idempotencyKey  = req.headers["idempotency-key"] || null;
+    const { durationMs, text } = req.body;
+    const idempotencyKey = req.headers["idempotency-key"] || null;
 
     const result = await interviewService.submitAnswer(
       req.params.id,
@@ -79,6 +79,10 @@ async function submitAnswer(req, res, next) {
         file:           req.file || null,
         durationMs:     durationMs ? Number(durationMs) : null,
         idempotencyKey,
+        // `text` field: candidate's typed answer (bypasses STT — used for dev/text testing)
+        // Per interview-api.md §19: "If client-side transcription is supported, transcript
+        // may also be supplied." Here we use a text field for the same purpose.
+        textAnswer:     typeof text === "string" && text.trim() ? text.trim() : null,
       }
     );
 
@@ -233,6 +237,7 @@ function _handleDomainError(err, res, next) {
     RESUME_CONTEXT_UNAVAILABLE: 404,
     INVALID_CONFIGURATION:      400,
     INVALID_INTERVIEW_MODE:     400,
+    INVALID_ANSWER:             400,
     INVALID_INTERVIEW_STATE:    409,
     INTERVIEW_NOT_ACTIVE:       409,
     INTERVIEW_ALREADY_STARTED:  409,
@@ -246,15 +251,35 @@ function _handleDomainError(err, res, next) {
     QUESTION_GENERATION_FAILED: 502,
     EXPLANATION_FAILED:         502,
     REPORT_GENERATION_FAILED:   502,
+    // AI provider errors — all map to 502 (upstream failure)
+    AI_CONFIG_ERROR:            500,
+    AI_SCHEMA_MISMATCH:         502,
+    AI_INVALID_JSON:            502,
+    AI_NETWORK_ERROR:           502,
+    AI_PROVIDER_ERROR:          502,
+    AI_EMPTY_RESPONSE:          502,
+    START_FAILED:               502,
+    SPEECH_CONFIG_ERROR:        500,
+    SPEECH_NETWORK_ERROR:       502,
+    SPEECH_PROVIDER_ERROR:      502,
     AUDIO_TOO_LARGE:            413,
     UNSUPPORTED_AUDIO_FORMAT:   415,
   };
 
-  if (err.code && STATUS_MAP[err.code]) {
-    return sendError(res, err.code, err.message, STATUS_MAP[err.code]);
+  // Handle Mongoose CastError (invalid ObjectId) → safe 404
+  if (err.name === "CastError" && err.kind === "ObjectId") {
+    return sendError(res, "INTERVIEW_NOT_FOUND", "Interview session not found.", 404);
   }
 
-  // Unknown error — pass to global error handler
+  if (err.code && STATUS_MAP[err.code]) {
+    // Never expose AI_CONFIG_ERROR details to client
+    const safeMessage = (err.code === "AI_CONFIG_ERROR")
+      ? "The AI service is not configured. Please contact support."
+      : err.message;
+    return sendError(res, err.code, safeMessage, STATUS_MAP[err.code]);
+  }
+
+  // Unknown error — pass to global error handler (logs internally, returns generic 500)
   return next(err);
 }
 

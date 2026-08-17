@@ -38,6 +38,25 @@ const speechService = require("./speech/speechService");
 const { MAX_RETRIES_PER_QUESTION } = require("../config/env");
 const { deleteStoredFile } = require("../utils/fileUtils");
 
+
+// ── ObjectId validation helper ────────────────────────────────────────────────
+const OBJECT_ID_RE = /^[a-fA-F0-9]{24}$/;
+
+/**
+ * Safely validate a MongoDB ObjectId string.
+ * Throws a 404 domain error if invalid — prevents Mongoose CastError → 500.
+ */
+function assertValidObjectId(id, resourceName = "Resource") {
+  if (!id || !OBJECT_ID_RE.test(String(id))) {
+    const err = new Error(`${resourceName} not found.`);
+    err.code   = resourceName.includes("Interview") ? "INTERVIEW_NOT_FOUND"
+               : resourceName.includes("Question")  ? "QUESTION_NOT_FOUND"
+               : "INTERVIEW_NOT_FOUND";
+    err.status = 404;
+    throw err;
+  }
+}
+
 // ── Valid state transitions ───────────────────────────────────────────────────
 // Per interview-data-model.md §50, interview-api.md §7
 const VALID_TRANSITIONS = {
@@ -186,6 +205,7 @@ async function createInterview(userId, body) {
  * @returns {Promise<object>} { session, question }
  */
 async function startInterview(sessionId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");
@@ -318,6 +338,7 @@ async function startInterview(sessionId, userId) {
  * @returns {Promise<object>} Session DTO
  */
 async function getInterview(sessionId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");
@@ -338,6 +359,7 @@ async function getInterview(sessionId, userId) {
  * @returns {Promise<object|null>} Question DTO or null
  */
 async function getCurrentQuestion(sessionId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");
@@ -376,8 +398,10 @@ async function getCurrentQuestion(sessionId, userId) {
  * @param {string|null} params.idempotencyKey
  * @returns {Promise<object>} Answer attempt result
  */
-async function submitAnswer(sessionId, questionId, userId, { file, durationMs, idempotencyKey }) {
+async function submitAnswer(sessionId, questionId, userId, { file, durationMs, idempotencyKey, textAnswer }) {
   // ── Ownership + state validation ──────────────────────────────────────────
+  assertValidObjectId(sessionId, "Interview session");
+  assertValidObjectId(questionId, "Question");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");
@@ -432,6 +456,22 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
     );
   }
 
+  // ── Determine answer input type ───────────────────────────────────────────
+  // Three valid paths (per interview-api.md §19, interview-backend-spec.md §22):
+  //   text  → submitted text IS the transcript; no STT needed
+  //   audio → send to speechService for STT
+  //   neither → proceed with empty transcript (dev_echo / future async)
+  const cleanTextAnswer = typeof textAnswer === "string" ? textAnswer.trim() : "";
+  const hasText  = cleanTextAnswer.length > 0;
+  const hasAudio = !!file;
+
+  // Validate: at least one answer source required
+  if (!hasText && !hasAudio) {
+    const err = new Error("An answer is required. Submit either audio or a text answer.");
+    err.code = "INVALID_ANSWER"; err.status = 400;
+    throw err;
+  }
+
   // ── Create answer attempt ─────────────────────────────────────────────────
   const attempt = new AnswerAttempt({
     sessionId:    session._id,
@@ -439,10 +479,11 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
     userId,
     attemptNumber,
     isRetry,
-    status:       file ? "uploaded" : "transcribing",
+    // Text answers skip "uploaded"; audio starts at "uploaded" before STT
+    status:       hasAudio ? "uploaded" : "transcribing",
     idempotencyKey: idempotencyKey || null,
     submittedAt:  new Date(),
-    audio: file ? {
+    audio: hasAudio ? {
       storageReference: file.filename,
       mimeType:         file.mimetype,
       durationMs:       durationMs ? Number(durationMs) : null,
@@ -463,12 +504,28 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
 
   // ── Process synchronously (V1) — lifecycle matches async contract ─────────
   try {
-    // 1. Transcription
+    // 1. Transcription — three-way branch
     attempt.status = "transcribing";
     await attempt.save();
 
-    let transcriptResult = { text: "", available: false, provider: "none", model: "none" };
-    if (file) {
+    let transcriptResult;
+
+    if (hasText) {
+      // ── Path A: text answer — submitted text IS the transcript ─────────────
+      // No STT call. The text the candidate typed is used directly.
+      // This enables full AI evaluation testing without an STT API key.
+      console.log("[interviewService] Text answer received — bypassing STT pipeline.");
+      transcriptResult = {
+        text:      cleanTextAnswer,
+        language:  "en",
+        confidence: null,   // not measurable from text input
+        provider:  "text_input",
+        model:     "none",
+        available: true,
+      };
+
+    } else {
+      // ── Path B: audio answer — use existing STT pipeline ──────────────────
       try {
         transcriptResult = await speechService.transcribeAudio(file.filename, file.mimetype);
       } catch (sttErr) {
@@ -489,12 +546,12 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
         throw err;
       }
 
-      // Delete audio after transcription (V1 retention policy)
+      // Delete audio after transcription (V1 retention policy — no long-term raw audio)
       speechService.deleteAudioAfterProcessing(file.filename);
       attempt.audio.deleted = true;
     }
 
-    // Store transcript
+    // Store transcript (same structure regardless of input path)
     attempt.transcript = {
       text:        transcriptResult.text        || "",
       language:    transcriptResult.language    || "en",
@@ -504,11 +561,12 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
       generatedAt: new Date(),
     };
 
-    // 2. Deterministic speech metrics (calculated from transcript, never fabricated)
+    // 2. Deterministic speech metrics (calculated from transcript text; never fabricated)
+    // For text answers: duration and audio-derived metrics are null (not measurable)
     const speechMetrics = speechService.computeSpeechMetrics({
       transcript:     transcriptResult.text || "",
       durationMs:     durationMs ? Number(durationMs) : null,
-      audioDurationMs:attempt.audio.durationMs || null,
+      audioDurationMs: hasAudio ? (attempt.audio?.durationMs ?? null) : null,
     });
 
     // 3. AI evaluation
@@ -640,6 +698,8 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
  * Per interview-api.md §25.
  */
 async function getAnswerStatus(sessionId, answerAttemptId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
+  assertValidObjectId(answerAttemptId, "Answer attempt");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");
@@ -675,6 +735,7 @@ async function getAnswerStatus(sessionId, answerAttemptId, userId) {
  * @returns {Promise<object>} { action, question? }
  */
 async function getNextAction(sessionId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");
@@ -832,6 +893,8 @@ async function getNextAction(sessionId, userId) {
  * @returns {Promise<object>} { question, attemptNumber }
  */
 async function retryQuestion(sessionId, questionId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
+  assertValidObjectId(questionId, "Question");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session || session.status !== "active") {
     const err = new Error("Interview session not found or not active.");
@@ -885,6 +948,8 @@ async function retryQuestion(sessionId, questionId, userId) {
  * Per interview-api.md §37–38.
  */
 async function requestExplanation(sessionId, userId, { questionId, topic }) {
+  assertValidObjectId(sessionId, "Interview session");
+  if (questionId) assertValidObjectId(questionId, "Question");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");
@@ -957,6 +1022,7 @@ async function continueAfterExplanation(sessionId, userId) {
  * @returns {Promise<object>} Session DTO
  */
 async function endInterview(sessionId, userId, reason = "user_ended") {
+  assertValidObjectId(sessionId, "Interview session");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");
@@ -969,7 +1035,7 @@ async function endInterview(sessionId, userId, reason = "user_ended") {
     return sessionToDto(session);
   }
 
-  if (!["active", "paused", "starting", "created"].includes(session.status)) {
+  if (!["active", "paused", "starting", "created", "failed"].includes(session.status)) {
     const err = new Error("Interview cannot be ended from its current state.");
     err.code = "INVALID_INTERVIEW_STATE"; err.status = 409;
     throw err;
@@ -997,6 +1063,7 @@ async function endInterview(sessionId, userId, reason = "user_ended") {
  * @returns {Promise<object>} Report DTO
  */
 async function generateReport(sessionId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");
@@ -1004,7 +1071,7 @@ async function generateReport(sessionId, userId) {
     throw err;
   }
 
-  if (!["completed", "abandoned", "active"].includes(session.status)) {
+  if (!["completed", "abandoned", "active", "failed"].includes(session.status)) {
     const err = new Error("Interview must be completed before generating a report.");
     err.code = "INTERVIEW_NOT_ACTIVE"; err.status = 409;
     throw err;
@@ -1180,6 +1247,7 @@ async function generateReport(sessionId, userId) {
  * Per interview-api.md §52.
  */
 async function getReport(sessionId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
   if (!session) {
     const err = new Error("Interview session not found.");

@@ -122,8 +122,16 @@ OUTPUT SCHEMA (strict JSON):
  */
 function parseEvaluationResponse(raw) {
   let cleaned = raw.trim();
+
+  // Strip markdown code fences
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  }
+
+  // Extract embedded JSON object — handles text-before/after patterns from free models
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    cleaned = jsonMatch[0];
   }
 
   let parsed;
@@ -135,11 +143,20 @@ function parseEvaluationResponse(raw) {
     throw err;
   }
 
-  // Required field check
+  // Required field check — if overallScore is missing but we have a JSON object,
+  // try to derive it from available scores rather than hard-fail
   if (typeof parsed.overallScore !== "number") {
-    const err = new Error("AI evaluation missing required overallScore.");
-    err.code = "AI_SCHEMA_MISMATCH";
-    throw err;
+    // Attempt to derive from average of present score fields
+    const scoreFields = ["technicalAccuracy","relevance","communication","clarity","structure","completeness"];
+    const presentScores = scoreFields.map(f => parsed[f]).filter(v => typeof v === "number");
+    if (presentScores.length > 0) {
+      parsed.overallScore = Math.round(presentScores.reduce((a, b) => a + b, 0) / presentScores.length);
+      console.warn("[parseEvaluationResponse] Derived overallScore from field average:", parsed.overallScore);
+    } else {
+      const err = new Error("AI evaluation missing required overallScore.");
+      err.code = "AI_SCHEMA_MISMATCH";
+      throw err;
+    }
   }
 
   // Normalize scores to valid range

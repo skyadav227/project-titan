@@ -108,8 +108,16 @@ OUTPUT SCHEMA (strict JSON):
  */
 function parseFinalReportResponse(raw) {
   let cleaned = raw.trim();
+
+  // Strip markdown code fences
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  }
+
+  // Extract embedded JSON object — handles text-before/after patterns from free models
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    cleaned = jsonMatch[0];
   }
 
   let parsed;

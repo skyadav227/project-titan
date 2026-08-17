@@ -55,7 +55,7 @@ async function generate(systemPrompt, userPrompt, options = {}) {
         "Content-Type":  "application/json",
         "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
         "HTTP-Referer":  APP_URL,
-        "X-Title":       "TITAN Resume Intelligence",
+        "X-Title":       "TITAN",
       },
       body: JSON.stringify(body),
     });

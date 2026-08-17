@@ -41,6 +41,7 @@ import {
   getCurrentQuestion,
   getNextAction,
   submitAnswer,
+  submitTextAnswer,
   getAnswerStatus,
   retryQuestion,
   requestExplanation,
@@ -202,6 +203,40 @@ export function InterviewProvider({ children }) {
 
       if (result.status === "completed") {
         // Synchronous processing completed — show feedback directly
+        dispatch({ type: "SET_ANSWER_RESULT", payload: result });
+        dispatch({ type: "SET_STATE", payload: "showing_report" });
+        dispatch({ type: "SET_LOADING", payload: false });
+      } else {
+        // Asynchronous — start polling
+        dispatch({ type: "SET_POLLING", payload: result.id });
+        startPolling(session.id, result.id);
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
+    } catch (err) {
+      dispatch({ type: "SET_ERROR", payload: err });
+      dispatch({ type: "SET_LOADING", payload: false });
+      dispatch({ type: "SET_STATE", payload: "asking" }); // allow retry
+    }
+  }, [state]);
+
+  // ── Submit text answer (dev/test path — bypasses STT) ─────────────────────
+  // Uses the submitted text directly as the transcript and routes it through
+  // the same AI evaluation pipeline as voice answers.
+  const submitTextAnswerAction = useCallback(async ({ text, idempotencyKey }) => {
+    const { session, question } = state;
+    if (!session?.id || !question?.id) return;
+
+    dispatch({ type: "SET_STATE", payload: "processing" });
+    dispatch({ type: "SET_LOADING", payload: true });
+    dispatch({ type: "SET_ERROR", payload: null });
+
+    try {
+      const result = await submitTextAnswer(session.id, question.id, {
+        text,
+        idempotencyKey,
+      });
+
+      if (result.status === "completed") {
         dispatch({ type: "SET_ANSWER_RESULT", payload: result });
         dispatch({ type: "SET_STATE", payload: "showing_report" });
         dispatch({ type: "SET_LOADING", payload: false });
@@ -422,6 +457,7 @@ export function InterviewProvider({ children }) {
     goToSetup,
     beginInterview,
     submitVoiceAnswer,
+    submitTextAnswerAction,
     continueToNext,
     retryCurrentQuestion,
     requestConceptExplanation,

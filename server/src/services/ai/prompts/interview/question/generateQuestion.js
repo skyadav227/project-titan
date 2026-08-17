@@ -154,14 +154,41 @@ OUTPUT SCHEMA (strict JSON):
  */
 function parseQuestionGenerationResponse(raw) {
   let cleaned = raw.trim();
+
+  // Strip markdown code fences
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  }
+
+  // Some models wrap response in text before/after JSON — extract the JSON object
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    cleaned = jsonMatch[0];
   }
 
   let parsed;
   try {
     parsed = JSON.parse(cleaned);
   } catch {
+    // Last resort: try to extract a question text directly from the raw response
+    // if the model returned plain text instead of JSON
+    const rawTrimmed = raw.trim();
+    if (rawTrimmed.length > 10 && rawTrimmed.length < 2000) {
+      // Treat the entire response as a question text
+      console.warn("[generateQuestion] AI returned non-JSON, treating as plain text question");
+      return {
+        action: "question",
+        question: {
+          text: rawTrimmed.slice(0, 500),
+          category: "technical",
+          topic: "general",
+          difficulty: "medium",
+          type: "initial",
+          expectedDurationSeconds: 120,
+        },
+        reason: "opening",
+      };
+    }
     const err = new Error("AI returned invalid JSON for question generation.");
     err.code = "AI_INVALID_JSON";
     throw err;
@@ -170,6 +197,30 @@ function parseQuestionGenerationResponse(raw) {
   // Schema validation
   const validActions = new Set(["question", "complete"]);
   if (!parsed.action || !validActions.has(parsed.action)) {
+    // If the model returned a question object at top level without "action" wrapper
+    if (parsed.question?.text || parsed.text) {
+      console.warn("[generateQuestion] AI returned question without action wrapper — normalizing");
+      return {
+        action: "question",
+        question: {
+          text: (parsed.question?.text || parsed.text || "").trim(),
+          category: parsed.question?.category || parsed.category || "technical",
+          topic: parsed.question?.topic || parsed.topic || "general",
+          difficulty: parsed.question?.difficulty || parsed.difficulty || "medium",
+          type: parsed.question?.type || "initial",
+          expectedDurationSeconds: 120,
+        },
+        reason: parsed.reason || "opening",
+      };
+    }
+    // If a standalone text field exists (model returned just the question text)
+    if (typeof parsed === "string" && parsed.trim().length > 5) {
+      return {
+        action: "question",
+        question: { text: parsed.trim(), category: "technical", topic: "general", difficulty: "medium", type: "initial", expectedDurationSeconds: 120 },
+        reason: "opening",
+      };
+    }
     const err = new Error("AI question response missing or invalid 'action' field.");
     err.code = "AI_SCHEMA_MISMATCH";
     throw err;
