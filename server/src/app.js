@@ -36,11 +36,22 @@ app.use(
     origin(origin, cb) {
       // Allow requests with no origin (curl, Postman, server-to-server)
       if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+
+      if (ALLOWED_ORIGINS.includes(origin)) {
+        return cb(null, true);
+      }
+
       cb(new Error(`CORS: origin ${origin} not allowed`));
     },
+
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Idempotency-Key",
+    ],
+
     credentials: true,
   })
 );
