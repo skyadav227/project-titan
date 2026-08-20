@@ -36,6 +36,9 @@ function getProvider() {
   if (p === "openai") {
     return require("./providers/openAiWhisperProvider");
   }
+  if (p === "local_whisper") {
+    return require("./providers/localWhisperProvider");
+  }
   if (p === "dev_echo") {
     return require("./providers/devEchoProvider");
   }
@@ -52,7 +55,7 @@ function getProvider() {
  * @returns {Promise<object>} Transcription result
  */
 async function transcribeAudio(storageReference, mimeType) {
-  const provider  = getProvider();
+  const provider = getProvider();
   const audioPath = resolveStoragePath(storageReference);
   return provider.transcribe(audioPath, mimeType);
 }
@@ -78,14 +81,14 @@ function computeSpeechMetrics({ transcript, durationMs, audioDurationMs }) {
   if (!text) {
     // No transcript — all metrics unavailable
     return {
-      wordCount:            null,
-      sentenceCount:        null,
-      speakingRate:         null,
-      fillerWordCount:      null,
-      fillerWordRate:       null,
-      fillerWordOccurrences:[],
-      responseDurationMs:   audioDurationMs ?? durationMs ?? null,
-      pauseCount:           null,
+      wordCount: null,
+      sentenceCount: null,
+      speakingRate: null,
+      fillerWordCount: null,
+      fillerWordRate: null,
+      fillerWordOccurrences: [],
+      responseDurationMs: audioDurationMs ?? durationMs ?? null,
+      pauseCount: null,
       totalPauseDurationMs: null,
     };
   }
@@ -111,7 +114,7 @@ function computeSpeechMetrics({ transcript, durationMs, audioDurationMs }) {
   }
 
   const fillerWordCount = Object.values(fillerOccurrences).reduce((a, b) => a + b, 0);
-  const fillerWordRate  = wordCount > 0 ? Math.round((fillerWordCount / wordCount) * 100 * 100) / 100 : null;
+  const fillerWordRate = wordCount > 0 ? Math.round((fillerWordCount / wordCount) * 100 * 100) / 100 : null;
 
   // Speaking rate (words per minute) — requires a duration
   const effectiveDurationMs = audioDurationMs ?? durationMs ?? null;
@@ -130,9 +133,9 @@ function computeSpeechMetrics({ transcript, durationMs, audioDurationMs }) {
     fillerWordCount,
     fillerWordRate,
     fillerWordOccurrences: Object.entries(fillerOccurrences).map(([word, count]) => ({ word, count })),
-    responseDurationMs:    effectiveDurationMs,
-    pauseCount:            null,
-    totalPauseDurationMs:  null,
+    responseDurationMs: effectiveDurationMs,
+    pauseCount: null,
+    totalPauseDurationMs: null,
   };
 }
 

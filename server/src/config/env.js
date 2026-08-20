@@ -45,9 +45,11 @@ module.exports = {
   APP_URL: process.env.APP_URL || "http://localhost:5173",
 
   // Speech / STT provider
-  SPEECH_PROVIDER: process.env.SPEECH_PROVIDER || "dev_echo",
-  OPENAI_API_KEY:  process.env.OPENAI_API_KEY  || "",
-  SPEECH_MODEL:    process.env.SPEECH_MODEL    || "whisper-1",
+  SPEECH_PROVIDER: process.env.SPEECH_PROVIDER || "local_whisper",
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+  SPEECH_MODEL: process.env.SPEECH_MODEL || "whisper-1",
+  SPEECH_PYTHON_PATH: process.env.SPEECH_PYTHON_PATH || "",
+  SPEECH_SCRIPT_PATH: process.env.SPEECH_SCRIPT_PATH || "",
 
   // Audio upload limits
   MAX_AUDIO_SIZE_MB: parseInt(process.env.MAX_AUDIO_SIZE_MB, 10) || 25,
@@ -55,8 +57,8 @@ module.exports = {
 
   // Interview configuration
   MAX_RETRIES_PER_QUESTION: parseInt(process.env.MAX_RETRIES_PER_QUESTION, 10) || 2,
-  AI_MAX_RETRIES:  parseInt(process.env.AI_MAX_RETRIES,  10) || 3,
-  AI_TIMEOUT_MS:   parseInt(process.env.AI_TIMEOUT_MS,   10) || 30000,
+  AI_MAX_RETRIES: parseInt(process.env.AI_MAX_RETRIES, 10) || 3,
+  AI_TIMEOUT_MS: parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000,
 
   // Derived
   IS_PRODUCTION: process.env.NODE_ENV === "production",
