@@ -38,7 +38,7 @@ module.exports = {
 
   // AI provider
   AI_PROVIDER: process.env.AI_PROVIDER || "openrouter",
-  AI_MODEL: process.env.AI_MODEL || "meta-llama/llama-3.1-8b-instruct:free",
+  AI_MODEL: process.env.AI_MODEL || "openrouter/free",
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || "",
 
   // App URL (sent as HTTP-Referer to OpenRouter)

@@ -9,9 +9,10 @@
  *   - Tags preferred
  *   - Simple progress indicators
  *
- * Milestone 5 additions:
- *   - AnimatedBar fills in for each skill row
- *   - Card enters with staggered fadeInUp
+ * Note: skill level numbers are not available in V1 (backend returns level: null).
+ * When level is null the card uses a tag-only layout, which matches the spec's
+ * "Tags preferred" guidance and avoids rendering bogus numeric values.
+ * The AnimatedBar + numeric layout is preserved for when real levels are added.
  */
 import { useDashboard } from "../../../contexts/DashboardContext";
 import DashboardCard from "../ui/DashboardCard";
@@ -20,7 +21,7 @@ import EmptyState from "../ui/EmptyState";
 import AnimatedBar from "../ui/AnimatedBar";
 import { IconReports } from "../ui/DashboardIcons";
 
-// ─── Skill row ────────────────────────────────────────────────────────────────
+// ─── Skill row — shown when a numeric level value exists ──────────────────────
 
 function SkillRow({ name, level, variant, barDelay }) {
   const barColor  = variant === "strong" ? "bg-white/50"    : "bg-amber-400/50";
@@ -45,6 +46,26 @@ function SkillRow({ name, level, variant, barDelay }) {
   );
 }
 
+// ─── Skill tag — used when only the name is available (level === null) ─────────
+
+function SkillTag({ name, variant }) {
+  const color = variant === "strong"
+    ? "border-white/[0.08] bg-white/[0.03] text-white/60"
+    : "border-amber-500/20 bg-amber-500/[0.05] text-amber-400/80";
+  return (
+    <span
+      className={`
+        inline-flex items-center
+        px-3 py-1.5 rounded-lg border
+        text-xs whitespace-nowrap
+        ${color}
+      `}
+    >
+      {name}
+    </span>
+  );
+}
+
 // ─── Topic tag ────────────────────────────────────────────────────────────────
 
 function TopicTag({ label }) {
@@ -60,6 +81,38 @@ function TopicTag({ label }) {
     >
       {label}
     </span>
+  );
+}
+
+// ─── Skill list — selects row vs tag based on data availability ───────────────
+
+function SkillList({ skills, variant, baseDelay }) {
+  // If any item has a real numeric level, use the bar row layout
+  const hasLevels = skills.some(s => typeof s.level === "number" && s.level !== null);
+
+  if (hasLevels) {
+    return (
+      <ul className="flex flex-col" role="list" aria-label={variant === "strong" ? "Strong skills" : "Skills needing improvement"}>
+        {skills.map((s, i) => (
+          <SkillRow
+            key={s.name}
+            name={s.name}
+            level={s.level}
+            variant={variant}
+            barDelay={baseDelay + i * 60}
+          />
+        ))}
+      </ul>
+    );
+  }
+
+  // Tag-only layout when level data is unavailable (V1 default)
+  return (
+    <div className="flex flex-wrap gap-2" role="list" aria-label={variant === "strong" ? "Strong areas" : "Areas needing improvement"}>
+      {skills.map(s => (
+        <SkillTag key={s.name} name={s.name} variant={variant} />
+      ))}
+    </div>
   );
 }
 
@@ -90,57 +143,46 @@ export default function SkillsOverviewCard() {
         <h2 className="text-base font-semibold text-white">Skills Overview</h2>
       </div>
 
-      {/* Strong Skills */}
-      <div className="flex flex-col gap-1.5">
-        <p className="text-xs font-medium text-white/30 uppercase tracking-wider mb-1">
-          Strengths
-        </p>
-        <ul className="flex flex-col" role="list" aria-label="Strong skills">
-          {skills.strong.map((s, i) => (
-            <SkillRow
-              key={s.name}
-              name={s.name}
-              level={s.level}
-              variant="strong"
-              barDelay={120 + i * 60}
-            />
-          ))}
-        </ul>
-      </div>
+      {/* Strengths */}
+      {skills.strong.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium text-white/30 uppercase tracking-wider">
+            Strengths
+          </p>
+          <SkillList skills={skills.strong} variant="strong" baseDelay={120} />
+        </div>
+      )}
 
-      <div className="h-px bg-white/[0.05]" aria-hidden="true" />
+      {skills.strong.length > 0 && skills.improve.length > 0 && (
+        <div className="h-px bg-white/[0.05]" aria-hidden="true" />
+      )}
 
-      {/* Needs Improvement */}
-      <div className="flex flex-col gap-1.5">
-        <p className="text-xs font-medium text-white/30 uppercase tracking-wider mb-1">
-          Needs work
-        </p>
-        <ul className="flex flex-col" role="list" aria-label="Skills needing improvement">
-          {skills.improve.map((s, i) => (
-            <SkillRow
-              key={s.name}
-              name={s.name}
-              level={s.level}
-              variant="improve"
-              barDelay={360 + i * 60}
-            />
-          ))}
-        </ul>
-      </div>
-
-      <div className="h-px bg-white/[0.05]" aria-hidden="true" />
+      {/* Needs work */}
+      {skills.improve.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium text-white/30 uppercase tracking-wider">
+            Needs work
+          </p>
+          <SkillList skills={skills.improve} variant="improve" baseDelay={360} />
+        </div>
+      )}
 
       {/* Recommended topics */}
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium text-white/30 uppercase tracking-wider">
-          Recommended topics
-        </p>
-        <div className="flex flex-wrap gap-2 min-w-0" role="list" aria-label="Recommended topics">
-          {skills.recommended.map((topic) => (
-            <TopicTag key={topic} label={topic} />
-          ))}
-        </div>
-      </div>
+      {skills.recommended.length > 0 && (
+        <>
+          <div className="h-px bg-white/[0.05]" aria-hidden="true" />
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium text-white/30 uppercase tracking-wider">
+              Recommended topics
+            </p>
+            <div className="flex flex-wrap gap-2 min-w-0" role="list" aria-label="Recommended topics">
+              {skills.recommended.map(topic => (
+                <TopicTag key={topic} label={topic} />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </DashboardCard>
   );
 }

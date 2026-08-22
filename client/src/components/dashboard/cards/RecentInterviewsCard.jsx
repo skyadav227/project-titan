@@ -66,7 +66,10 @@ function InterviewRow({ interview }) {
       {/* Right: date, score, report link */}
       <div className="flex items-center gap-3 flex-shrink-0">
         <span className="text-xs text-white/25 hidden sm:block">{date}</span>
-        <ScorePill score={interview.score} />
+        {interview.score !== null && interview.score !== undefined
+          ? <ScorePill score={interview.score} />
+          : <span className="text-xs text-white/20 tabular-nums">—</span>
+        }
         <Link
           to={interview.reportRoute}
           className="
@@ -75,7 +78,7 @@ function InterviewRow({ interview }) {
             focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/30 rounded
             whitespace-nowrap
           "
-          aria-label={`View report for ${interview.role} at ${interview.company}`}
+          aria-label={`View report for ${interview.role}${interview.company ? ` at ${interview.company}` : ""}`}
         >
           Report →
         </Link>

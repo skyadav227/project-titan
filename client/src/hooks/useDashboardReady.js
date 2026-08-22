@@ -1,37 +1,29 @@
 /**
  * useDashboardReady
  *
- * Simulates an API loading state for the dashboard.
- * Returns `ready: true` after a short delay, triggering card content
- * to replace skeleton loaders.
+ * Returns true once the dashboard data is ready to render.
  *
- * In production: replace this hook with your actual data-fetching
- * loading state (from React Query, SWR, Redux, etc.).
+ * Previously used a fake 380ms delay.
+ * Now reads from DashboardContext.loading — cards render their real
+ * content (or correct empty states) as soon as the API responds.
  *
- * Implementation notes:
- *   We track `readyKey` — the key value that the current `ready: true`
- *   was resolved for. If `readyKey !== key` the hook is still resolving,
- *   so we return false without a synchronous setState call inside the effect.
- *
- * The 380ms delay:
- *   - Long enough for the skeleton to register visually (prevents flash)
- *   - Short enough to feel instant (<400ms is perceived as near-instant)
+ * A minimum visual delay of 200ms is kept to prevent a flash of
+ * un-animated content on very fast connections.
  */
 import { useState, useEffect } from "react";
+import { useDashboard } from "../contexts/DashboardContext";
 
-const LOADING_DELAY_MS = 380;
+const MIN_DISPLAY_MS = 200;
 
-export function useDashboardReady(key = null) {
-  // `readyKey` tracks which key the resolved state belongs to
-  const [readyKey, setReadyKey] = useState(/** @type {any} */(null));
+export function useDashboardReady() {
+  const { loading } = useDashboard();
+  const [minElapsed, setMinElapsed] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setReadyKey(key);
-    }, LOADING_DELAY_MS);
+    const t = setTimeout(() => setMinElapsed(true), MIN_DISPLAY_MS);
+    return () => clearTimeout(t);
+  }, []);
 
-    return () => clearTimeout(timer);
-  }, [key]);
-
-  return readyKey === key;
+  // Ready when both the minimum delay has passed AND data has loaded
+  return minElapsed && !loading;
 }

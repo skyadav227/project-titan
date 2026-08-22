@@ -1,101 +1,196 @@
 /**
  * DashboardContext
  *
- * Provides all dashboard state and data to dashboard components.
+ * Provides real dashboard data to all dashboard components.
  *
- * AuthContext is the source of truth for user identity.
- * ResumeContext is the source of truth for resume state.
+ * Data sources (in order of precedence):
+ *   1. AuthContext         → user identity (name, email, createdAt)
+ *   2. ResumeContext       → resume status (already consumed by ResumeStatusCard directly)
+ *   3. GET /api/dashboard/stats → all interview-derived stats, performance, history, etc.
  *
- * Dashboard-specific mock content remains in dashboardMockData.js
- * until the corresponding backend APIs are available.
+ * The mock-data import has been removed.
+ * Every field now comes from the backend or is explicitly null / empty.
+ *
+ * Public interface is preserved:
+ *   useDashboard() returns { isFirstTimeUser, data, greeting, unreadCount }
+ *
+ * Loading states:
+ *   - `loading === true`  while the API call is in flight
+ *   - `error !== null`    if the API call failed
+ *   - Components receive null/empty values during loading (skeletons cover them)
  */
 
-import { createContext, useContext, useMemo, useState } from "react";
 import {
-  firstTimeUserData,
-  returningUserData,
-} from "../data/dashboardMockData";
-import { useAuth } from "./AuthContext";
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+} from "react";
+import { useAuth }  from "./AuthContext";
+import { getDashboardStats } from "../services/dashboardService";
 
 const DashboardContext = createContext(null);
 
+// ── Empty/initial state (shown while loading or on error) ─────────────────────
+// All fields explicitly null or [] so cards render empty states
+// rather than fabricated numbers.
+const EMPTY_DATA = {
+  user: {
+    name:           "",
+    email:          "",
+    avatarInitials: "",
+    joinedDate:     null,
+  },
+  stats: {
+    interviewsCompleted:   0,
+    totalSessions:         0,
+    totalQuestionsAnswered:0,
+    overallScore:          null,
+    previousScore:         null,
+    streak:                null,
+    rank:                  null,
+    totalUsers:            null,
+    level:                 null,
+    levelProgress:         null,
+  },
+  performance: {
+    overall:       { score: null, delta: null },
+    technical:     { score: null, delta: null },
+    communication: { score: null, delta: null },
+    clarity:       { score: null, delta: null },
+  },
+  recentInterviews: [],
+  activityFeed:     [],
+  todaysMissions:   [],
+  aiMentor: {
+    recommendation: "Complete your first interview to receive personalised recommendations.",
+    reason:         "TITAN adapts its coaching to your actual performance data.",
+    ctaLabel:       "Start Interview",
+    ctaRoute:       "/interview/setup",
+  },
+  skills:        null,
+  onboarding: {
+    checklist: [
+      { id: "resume",    label: "Upload your resume",            completed: false, route: "/resume"          },
+      { id: "interview", label: "Complete your first interview", completed: false, route: "/interview/setup" },
+      { id: "report",    label: "Review your first report",      completed: false, route: "/history"         },
+    ],
+  },
+  notifications: [],
+};
+
 export function DashboardProvider({ children }) {
-  /*
-   * Temporary development toggle.
-   *
-   * We are keeping this until the interview backend exists.
-   * At that point, isFirstTimeUser will be derived from real
-   * user/interview history instead of being manually controlled.
-   */
-  const [isFirstTimeUser, setIsFirstTimeUser] = useState(false);
+  const { user, loading: authLoading } = useAuth();
 
-  const { user } = useAuth();
+  const [stats,   setStats]   = useState(null);     // raw API response
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
 
-  // Select dashboard content based on the temporary state.
-  const data = isFirstTimeUser
-    ? firstTimeUserData
-    : returningUserData;
+  // ── Fetch dashboard stats once auth is ready ──────────────────────────────
+  const fetchStats = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getDashboardStats();
+      setStats(data);
+    } catch (err) {
+      console.error("[DashboardContext] Failed to load stats:", err);
+      setError(err);
+      setStats(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  // Greeting — changes naturally throughout the day.
-  const getGreeting = () => {
+  useEffect(() => {
+    // Don't fetch until auth has resolved (avoids a 401 on mount)
+    if (!authLoading) {
+      fetchStats();
+    }
+  }, [authLoading, fetchStats]);
+
+  // ── Greeting ──────────────────────────────────────────────────────────────
+  const greeting = useMemo(() => {
     const hour = new Date().getHours();
-
-    if (hour >= 5 && hour < 12) return "Good morning";
+    if (hour >= 5  && hour < 12) return "Good morning";
     if (hour >= 12 && hour < 17) return "Good afternoon";
-
     return "Good evening";
-  };
+  }, []);
 
-  // Unread notification count.
-  const unreadCount = !isFirstTimeUser
-    ? (data.notifications ?? []).filter((n) => !n.read).length
-    : 0;
+  // ── Derived: isFirstTimeUser ──────────────────────────────────────────────
+  // Comes from the backend (totalSessions === 0); falls back to false
+  // so the returning-user layout renders while data is loading.
+  const isFirstTimeUser = stats ? stats.isFirstTimeUser : false;
 
-  /*
-   * Use the real authenticated user's identity.
-   *
-   * Mock dashboard data still supplies fallback values for fields
-   * that are not yet available from the backend.
-   */
-  const dashboardUser = {
-    ...data.user,
+  // ── Build the data object that cards consume ──────────────────────────────
+  const data = useMemo(() => {
+    const base = stats || EMPTY_DATA;
 
-    name: user?.name ?? data.user.name,
+    // Derive avatar initials and joinedDate from real AuthContext user
+    const avatarInitials = user?.name
+      ? user.name
+          .split(" ")
+          .map(p => p[0])
+          .join("")
+          .slice(0, 3)
+          .toUpperCase()
+      : "?";
 
-    email: user?.email ?? data.user.email,
+    const dashboardUser = {
+      name:           user?.name      || "",
+      email:          user?.email     || "",
+      avatarInitials,
+      joinedDate:     user?.createdAt ? user.createdAt.slice(0, 10) : null,
+    };
 
-    avatarInitials:
-      user?.name
-        ?.split(" ")
-        .map((part) => part[0])
-        .join("")
-        .slice(0, 3)
-        .toUpperCase() ?? data.user.avatarInitials,
+    // ── Onboarding checklist ─────────────────────────────────────────────────
+    // hasResume comes directly from the backend (ResumeVersion.isActive query).
+    // It is NOT derived from isFirstTimeUser — a user can have a resume with
+    // zero interviews, or interviews with no resume.
+    const hasResume    = stats?.hasResume === true;
+    const hasInterview = (stats?.stats?.interviewsCompleted || 0) > 0;
+    const hasReport    = (stats?.recentInterviews || []).some(i => i.score !== null);
 
-    joinedDate: user?.createdAt
-      ? user.createdAt.slice(0, 10)
-      : data.user.joinedDate,
-  };
+    const onboardingChecklist = [
+      { id: "resume",    label: "Upload your resume",            completed: hasResume,    route: "/resume"          },
+      { id: "interview", label: "Complete your first interview", completed: hasInterview, route: "/interview/setup" },
+      { id: "report",    label: "Review your first report",      completed: hasReport,    route: "/history"         },
+    ];
+
+    return {
+      user: dashboardUser,
+      stats:            base.stats,
+      performance:      base.performance,
+      recentInterviews: base.recentInterviews,
+      activityFeed:     base.activityFeed,
+      todaysMissions:   base.todaysMissions,
+      aiMentor:         base.aiMentor,
+      skills:           base.skills ?? null,
+      notifications:    [],    // V1: no backend notifications; empty array renders "all caught up"
+      onboarding: {
+        checklist: onboardingChecklist,
+      },
+    };
+  }, [stats, user]);
+
+  // ── Notification count ────────────────────────────────────────────────────
+  const unreadCount = 0; // V1: no notification backend
 
   const value = useMemo(
     () => ({
       isFirstTimeUser,
-      setIsFirstTimeUser,
-
-      data: {
-        ...data,
-        user: dashboardUser,
-      },
-
-      greeting: getGreeting(),
-      unreadCount,
-    }),
-    [
-      isFirstTimeUser,
+      // setIsFirstTimeUser kept for DevStateToggle compatibility
+      setIsFirstTimeUser: () => {},  // noop — now derived from real data
       data,
-      dashboardUser,
+      greeting,
       unreadCount,
-    ]
+      loading,
+      error,
+      refetch: fetchStats,
+    }),
+    [isFirstTimeUser, data, greeting, unreadCount, loading, error, fetchStats]
   );
 
   return (
@@ -108,12 +203,6 @@ export function DashboardProvider({ children }) {
 // eslint-disable-next-line react-refresh/only-export-components
 export function useDashboard() {
   const ctx = useContext(DashboardContext);
-
-  if (!ctx) {
-    throw new Error(
-      "useDashboard must be used within a DashboardProvider"
-    );
-  }
-
+  if (!ctx) throw new Error("useDashboard must be used within a DashboardProvider");
   return ctx;
 }

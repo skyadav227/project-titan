@@ -45,9 +45,6 @@ import ResumeStatusCard        from "../components/dashboard/cards/ResumeStatusC
 import GettingStartedCard  from "../components/dashboard/cards/GettingStartedCard";
 import InterviewJourneyCard from "../components/dashboard/cards/InterviewJourneyCard";
 
-// Dev toggle — remove before production
-import DevStateToggle from "../components/dashboard/DevStateToggle";
-
 // ─── Skeleton placeholders ────────────────────────────────────────────────────
 // Mirror the exact layout slots so there is zero content shift on load.
 
@@ -144,8 +141,7 @@ function ReturningDashboard() {
 
 function DashboardContent() {
   const { isFirstTimeUser } = useDashboard();
-  // Key changes when user state flips → re-triggers loading animation
-  const ready = useDashboardReady(isFirstTimeUser);
+  const ready = useDashboardReady();
 
   if (!ready) {
     return (
@@ -162,7 +158,6 @@ export default function DashboardPage() {
   return (
     <DashboardLayout>
       <DashboardContent />
-      <DevStateToggle />
     </DashboardLayout>
   );
 }

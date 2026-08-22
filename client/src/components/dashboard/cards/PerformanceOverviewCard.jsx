@@ -19,6 +19,7 @@ import DashboardCard from "../ui/DashboardCard";
 import SectionLabel from "../ui/SectionLabel";
 import ScoreBadge from "../ui/ScoreBadge";
 import AnimatedBar from "../ui/AnimatedBar";
+import EmptyState from "../ui/EmptyState";
 import { IconReports } from "../ui/DashboardIcons";
 
 // ─── Individual score card ────────────────────────────────────────────────────
@@ -63,6 +64,26 @@ export default function PerformanceOverviewCard() {
   const { data } = useDashboard();
   const { performance, stats } = data;
 
+  // Guard: if no real data yet, show empty state
+  if (!performance?.overall?.score && performance?.overall?.score !== 0) {
+    return (
+      <DashboardCard className="flex flex-col gap-5" enterIndex={3}>
+        <div className="flex items-start justify-between">
+          <div className="flex flex-col gap-1">
+            <SectionLabel>Progress</SectionLabel>
+            <h2 className="text-base font-semibold text-white">Performance Overview</h2>
+          </div>
+        </div>
+        <EmptyState
+          icon={<IconReports className="w-5 h-5" />}
+          message="Complete interviews to see your performance breakdown here."
+          ctaLabel="Start Interview"
+          ctaRoute="/interview/setup"
+        />
+      </DashboardCard>
+    );
+  }
+
   return (
     <DashboardCard className="flex flex-col gap-5" enterIndex={3}>
       {/* Header */}
@@ -85,9 +106,8 @@ export default function PerformanceOverviewCard() {
         </div>
       </div>
 
-      {/* Score grid — 2 columns. Overall spans full width. */}
+      {/* Score grid — 2 columns */}
       <div className="grid grid-cols-2 gap-3">
-        {/* Overall — col-span-2 handled in ScoreCard's isOverall prop */}
         <ScoreCard
           label="Overall"
           score={performance.overall.score}
@@ -97,42 +117,40 @@ export default function PerformanceOverviewCard() {
         />
         <ScoreCard
           label="Communication"
-          score={performance.communication.score}
-          delta={performance.communication.delta}
+          score={performance.communication?.score}
+          delta={performance.communication?.delta}
           countDelay={180}
         />
         <ScoreCard
           label="Technical"
-          score={performance.technical.score}
-          delta={performance.technical.delta}
+          score={performance.technical?.score}
+          delta={performance.technical?.delta}
           countDelay={260}
         />
         <ScoreCard
-          label="Confidence"
-          score={performance.confidence.score}
-          delta={performance.confidence.delta}
+          label="Clarity"
+          score={performance.clarity?.score}
+          delta={performance.clarity?.delta}
           countDelay={340}
         />
       </div>
 
-      {/* Level progress */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-white/30">Level: {stats.level}</span>
-          <span className="text-xs text-white/30 tabular-nums">
-            {stats.levelProgress}% to next
-          </span>
+      {/* Level progress — only shown when backend provides it */}
+      {stats.level && stats.levelProgress !== null && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-white/30">Level: {stats.level}</span>
+            <span className="text-xs text-white/30 tabular-nums">
+              {stats.levelProgress}% to next
+            </span>
+          </div>
+          <AnimatedBar
+            value={stats.levelProgress}
+            colorClass="bg-white/30"
+            delay={420}
+          />
         </div>
-        <AnimatedBar
-          value={stats.levelProgress}
-          colorClass="bg-white/30"
-          delay={420}
-          aria-valuenow={stats.levelProgress}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label={`Level progress: ${stats.levelProgress}%`}
-        />
-      </div>
+      )}
     </DashboardCard>
   );
 }

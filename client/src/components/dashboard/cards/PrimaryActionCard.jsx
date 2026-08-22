@@ -130,18 +130,23 @@ function ReturningActionCard({ data }) {
               <span className="text-xs text-white/35">
                 Last:{" "}
                 <span className="text-white/55">
-                  {lastInterview.role} @ {lastInterview.company}
+                  {lastInterview.role}
+                  {lastInterview.company ? ` @ ${lastInterview.company}` : ""}
                 </span>
-                {" "}·{" "}
-                <span
-                  className={
-                    lastInterview.score >= 75
-                      ? "text-emerald-400/80"
-                      : "text-amber-400/80"
-                  }
-                >
-                  {lastInterview.score}/100
-                </span>
+                {lastInterview.score !== null && (
+                  <>
+                    {" "}·{" "}
+                    <span
+                      className={
+                        lastInterview.score >= 75
+                          ? "text-emerald-400/80"
+                          : "text-amber-400/80"
+                      }
+                    >
+                      {lastInterview.score}/100
+                    </span>
+                  </>
+                )}
               </span>
             )}
           </div>
@@ -151,14 +156,21 @@ function ReturningActionCard({ data }) {
           </h2>
 
           <p className="text-sm text-white/45 leading-relaxed max-w-md">
-            Your overall score is{" "}
-            <span className="text-white font-semibold">
-              {performance.overall.score}/100
-            </span>
-            . {performance.technical.delta > 0
-              ? `Technical improved +${performance.technical.delta}% this week.`
-              : "Focus on technical skills to improve your score."
-            }
+            {performance.overall.score !== null ? (
+              <>
+                Your overall score is{" "}
+                <span className="text-white font-semibold">
+                  {performance.overall.score}/100
+                </span>
+                .{" "}
+                {performance.technical.delta !== null && performance.technical.delta > 0
+                  ? `Technical improved +${performance.technical.delta} pts this week.`
+                  : "Keep practising to improve your score."
+                }
+              </>
+            ) : (
+              "Complete an interview with a final report to see your performance overview."
+            )}
           </p>
         </div>
 

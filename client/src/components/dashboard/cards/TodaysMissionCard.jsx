@@ -98,9 +98,9 @@ export default function TodaysMissionCard() {
         </span>
       </div>
 
-      {/* Animated progress bar */}
+      {/* Animated progress bar — guard against empty missions list */}
       <AnimatedBar
-        value={(doneCount / missions.length) * 100}
+        value={missions.length > 0 ? (doneCount / missions.length) * 100 : 0}
         colorClass="bg-white/50"
         delay={80}
         aria-valuenow={doneCount}
@@ -116,7 +116,7 @@ export default function TodaysMissionCard() {
         ))}
       </ul>
 
-      {doneCount === missions.length && (
+      {missions.length > 0 && doneCount === missions.length && (
         <p className="text-xs text-emerald-400/70 text-center pt-1">
           All missions complete. Great work today!
         </p>
