@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const { OPENROUTER_API_KEY, AI_MODEL, APP_URL } = require("../../../config/env");
+const { OPENROUTER_API_KEY, AI_MODEL, APP_URL, AI_TIMEOUT_MS } = require("../../../config/env");
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -47,6 +47,14 @@ async function generate(systemPrompt, userPrompt, options = {}) {
     temperature,
   };
 
+  // ── Timeout via AbortController ───────────────────────────────────────────
+  // AI_TIMEOUT_MS defaults to 30000 (30s) from env.js.
+  // Without this, a slow free model could hold the request open indefinitely,
+  // leaving the user on the "Processing" screen forever.
+  const timeoutMs = AI_TIMEOUT_MS || 30000;
+  const controller = new AbortController();
+  const timeoutId  = setTimeout(() => controller.abort(), timeoutMs);
+
   let response;
   try {
     response = await fetch(OPENROUTER_API_URL, {
@@ -57,13 +65,23 @@ async function generate(systemPrompt, userPrompt, options = {}) {
         "HTTP-Referer":  APP_URL,
         "X-Title":       "TITAN",
       },
-      body: JSON.stringify(body),
+      body:   JSON.stringify(body),
+      signal: controller.signal,
     });
   } catch (netErr) {
+    clearTimeout(timeoutId);
+    if (netErr.name === "AbortError") {
+      console.error(`[openRouterAdapter] Request timed out after ${timeoutMs}ms`);
+      const err = new Error(`AI provider timed out after ${timeoutMs / 1000}s. Please try again.`);
+      err.code = "AI_NETWORK_ERROR";
+      throw err;
+    }
     console.error("[openRouterAdapter] Network error:", netErr.message);
     const err = new Error("Could not reach the AI provider. Please try again.");
     err.code = "AI_NETWORK_ERROR";
     throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   if (!response.ok) {

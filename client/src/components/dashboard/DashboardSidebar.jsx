@@ -21,7 +21,6 @@ import { Link, useLocation } from "react-router-dom";
 import {
   IconDashboard,
   IconInterview,
-  IconReports,
   IconHistory,
   IconLeaderboard,
   IconResume,
@@ -35,7 +34,6 @@ import {
 const PRIMARY_NAV = [
   { label: "Dashboard",    href: "/dashboard",    Icon: IconDashboard   },
   { label: "Interview",    href: "/interview",    Icon: IconInterview   },
-  { label: "Reports",      href: "/report",       Icon: IconReports     },
   { label: "History",      href: "/history",      Icon: IconHistory     },
   { label: "Leaderboard",  href: "/leaderboard",  Icon: IconLeaderboard },
   { label: "Resume",       href: "/resume",       Icon: IconResume      },

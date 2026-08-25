@@ -15,7 +15,7 @@
  *   retrying        → same question, new attempt
  *   explaining      → explanation panel shown
  *   completing      → final question processed, generating report
- *   report_ready    → master report available
+ *   report_ready    → master report available (navigate to /reports/:id)
  *   error           → recoverable error state
  *
  * The backend is the SINGLE source of truth for:
@@ -24,6 +24,8 @@
  * This context only manages UI interaction state and caches backend data.
  *
  * On mount (or navigation to /interview/session/:id): restores from backend.
+ * When report_ready is set, reportSessionId holds the session ID so the
+ * rendering component can navigate to /reports/:sessionId.
  */
 import {
   createContext,
@@ -70,6 +72,7 @@ const INITIAL_STATE = {
   error:         null,        // { code, message } or null
   isLoading:     false,       // generic async flag
   pollingAttemptId: null,     // answer attempt being polled
+  reportSessionId:  null,     // set when report_ready — the session ID to navigate to
 };
 
 function reducer(state, action) {
@@ -94,6 +97,8 @@ function reducer(state, action) {
       return { ...state, isLoading: action.payload };
     case "SET_POLLING":
       return { ...state, pollingAttemptId: action.payload };
+    case "SET_REPORT_SESSION_ID":
+      return { ...state, reportSessionId: action.payload };
     case "RESET":
       return { ...INITIAL_STATE };
     default:
@@ -126,27 +131,39 @@ export function InterviewProvider({ children }) {
       const session = await getInterview(sessionId);
       dispatch({ type: "SET_SESSION", payload: session });
 
-      // Determine UI state from backend session status
-      if (session.status === "completed") {
+      // Determine UI state from backend session status.
+      // Both "completed" and "abandoned" sessions can have a generated report.
+      const hasReadyReport =
+        session.hasReport ||
+        session.reportStatus === "ready";
+
+      if (
+        (session.status === "completed" || session.status === "abandoned") &&
+        hasReadyReport
+      ) {
         const report = await getReport(sessionId).catch(() => null);
         dispatch({ type: "SET_REPORT", payload: report });
+        // Also store reportSessionId so InterviewPage's guard has it
+        dispatch({ type: "SET_REPORT_SESSION_ID", payload: sessionId });
         dispatch({ type: "SET_STATE", payload: "report_ready" });
         return;
       }
 
       if (session.status === "active") {
+        // Active session — restore to asking state for /interview/session/:id
+        // If this is called from ReportPage (/history/:id), the page will
+        // show "no report available" which is correct — this session has no report.
         const { question } = await getCurrentQuestion(sessionId);
         if (question) {
           dispatch({ type: "SET_QUESTION", payload: question });
           dispatch({ type: "SET_STATE", payload: "asking" });
         } else {
-          // Session active but no pending question — need to call next
           dispatch({ type: "SET_STATE", payload: "asking" });
         }
         return;
       }
 
-      // created/starting → go back to setup
+      // created/starting/failed/abandoned-without-report → setup
       dispatch({ type: "SET_STATE", payload: "idle" });
     } catch (err) {
       dispatch({ type: "SET_ERROR", payload: err });
@@ -404,12 +421,17 @@ export function InterviewProvider({ children }) {
   }, [state]);
 
   // ── Generate + poll report ────────────────────────────────────────────────
+  // Sets reportSessionId when ready so the rendering component (InterviewPage)
+  // can navigate to /history/:sessionId — the canonical home for reports.
+  // The context does not call useNavigate directly because it mounts outside
+  // BrowserRouter (in App.jsx above AppRouter).
   async function triggerReportGeneration(sessionId) {
     try {
       const reportResult = await generateReport(sessionId);
 
       if (reportResult?.status === "ready" || reportResult?.overallScore !== undefined) {
         dispatch({ type: "SET_REPORT", payload: reportResult });
+        dispatch({ type: "SET_REPORT_SESSION_ID", payload: sessionId });
         dispatch({ type: "SET_STATE", payload: "report_ready" });
       } else {
         // Poll for report completion
@@ -426,6 +448,7 @@ export function InterviewProvider({ children }) {
             if (r?.status === "ready" || r?.overallScore !== undefined) {
               clearInterval(reportPollInterval);
               dispatch({ type: "SET_REPORT", payload: r });
+              dispatch({ type: "SET_REPORT_SESSION_ID", payload: sessionId });
               dispatch({ type: "SET_STATE", payload: "report_ready" });
             }
           } catch { /* keep polling */ }
@@ -433,6 +456,7 @@ export function InterviewProvider({ children }) {
       }
     } catch (err) {
       dispatch({ type: "SET_ERROR", payload: { code: "REPORT_GENERATION_FAILED", message: "We couldn't generate your report. Your session data is saved." } });
+      dispatch({ type: "SET_REPORT_SESSION_ID", payload: sessionId });
       dispatch({ type: "SET_STATE", payload: "report_ready" }); // show what we have
     }
   }

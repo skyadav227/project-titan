@@ -792,7 +792,23 @@ async function getNextAction(sessionId, userId) {
 
     // Rebuild strategy context from session data
     const strategyCtx = {
-      currentDifficulty: session.configuration?.difficulty === "adaptive" ? "medium" : session.configuration?.difficulty,
+      // Adaptive difficulty: if configured as "adaptive", derive the current
+      // difficulty from the candidate's recent performance rather than hardcoding "medium".
+      // Uses the last attempt's overall score:
+      //   score >= 75 → candidate is performing well → increase to hard
+      //   score >= 50 → moderate performance → keep medium
+      //   score < 50  → struggling → drop to easy
+      // For non-adaptive difficulty, use the configured value directly.
+      currentDifficulty: (() => {
+        if (session.configuration?.difficulty !== "adaptive") {
+          return session.configuration?.difficulty || "medium";
+        }
+        const lastScore = lastAttempt?.analysis?.overallScore ?? null;
+        if (lastScore === null) return "medium"; // no prior data yet — start medium
+        if (lastScore >= 75)   return "hard";
+        if (lastScore >= 50)   return "medium";
+        return "easy";
+      })(),
       coveredTopics:     previousQs.map(q => q.generationContext?.topic || q.category).filter(Boolean),
       weakTopics:        [],
       strongTopics:      [],

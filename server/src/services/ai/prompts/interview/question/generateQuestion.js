@@ -32,30 +32,34 @@ function buildQuestionGenerationPrompt(ctx) {
     isFirstQuestion   = false,
   } = ctx;
 
-  const systemPrompt = `You are an expert technical interviewer conducting a professional interview for TITAN, an AI interview training platform.
+  // ── Derive human-readable difficulty guidance ─────────────────────────────
+  const difficultyGuidance = _buildDifficultyGuidance(strategyContext.currentDifficulty);
 
-Your role is to generate ONE focused, contextually relevant interview question.
+  // ── Derive interview-type guidance ────────────────────────────────────────
+  const typeGuidance = _buildTypeGuidance(
+    interviewContext.interviewType,
+    interviewContext.role
+  );
 
-CRITICAL RULES:
-- Generate exactly ONE question — never multiple questions
-- Base questions ONLY on information provided in the context — never invent candidate experience
-- The question must be appropriate for the candidate's experience level and interview stage
-- Do not expose your reasoning to the candidate
-- Return ONLY valid JSON matching the schema below — no markdown, no explanation, no wrapper text
+  // ── Derive stage guidance ─────────────────────────────────────────────────
+  const stageGuidance = _buildStageGuidance(
+    strategyContext.interviewStage,
+    isFirstQuestion
+  );
 
-OUTPUT SCHEMA (strict JSON):
-{
-  "action": "question",
-  "question": {
-    "text": "<the question text — clear, professional, focused>",
-    "category": "<one of: technical|behavioral|project|resume|company|role|job_description|follow_up|system_design|problem_solving|scenario|conceptual>",
-    "topic": "<brief topic label e.g. 'JWT authentication' or 'React state management'>",
-    "difficulty": "<easy|medium|hard>",
-    "type": "<initial|follow_up|clarification|weak_area|strength_probe|topic_transition>",
-    "expectedDurationSeconds": <integer 60–180>
-  },
-  "reason": "<internal only — one of: opening|follow_up|clarification|weak_area|strength_probe|difficulty_increase|difficulty_decrease|topic_transition|explanation_follow_up>"
-}`;
+  const systemPrompt = `You are an expert professional interviewer for TITAN, an AI interview training platform. Generate ONE focused, relevant interview question.
+
+RULES:
+- Exactly ONE question per response
+- Use only information provided — never invent candidate experience
+- Return ONLY valid JSON — no markdown, no prose around it
+
+DIFFICULTY: ${difficultyGuidance}
+TYPE: ${typeGuidance}
+STAGE: ${stageGuidance}
+
+OUTPUT SCHEMA:
+{"action":"question","question":{"text":"<question>","category":"<technical|behavioral|project|resume|role|follow_up|system_design|problem_solving|scenario|conceptual>","topic":"<brief label>","difficulty":"<easy|medium|hard>","type":"<initial|follow_up|clarification|weak_area|strength_probe|topic_transition>","expectedDurationSeconds":<60-180>},"reason":"<opening|follow_up|clarification|weak_area|strength_probe|difficulty_increase|difficulty_decrease|topic_transition|explanation_follow_up>"}`;
 
   // Build context section for the user prompt
   const lines = [];
@@ -63,7 +67,7 @@ OUTPUT SCHEMA (strict JSON):
   // Interview parameters
   lines.push("=== INTERVIEW PARAMETERS ===");
   lines.push(`Interview Type: ${interviewContext.interviewType || "mixed"}`);
-  lines.push(`Difficulty Target: ${strategyContext.currentDifficulty}`);
+  lines.push(`Difficulty: ${strategyContext.currentDifficulty}`);
   lines.push(`Stage: ${strategyContext.interviewStage}`);
   lines.push(`Questions Answered: ${strategyContext.questionsAnswered}`);
   lines.push(`Questions Remaining: ${strategyContext.questionsRemaining}`);
@@ -99,7 +103,7 @@ OUTPUT SCHEMA (strict JSON):
   // Strategy state
   lines.push("\n=== INTERVIEW STRATEGY ===");
   if (strategyContext.coveredTopics?.length) lines.push(`Already Covered: ${strategyContext.coveredTopics.join(", ")}`);
-  if (strategyContext.weakTopics?.length) lines.push(`Weak Areas: ${strategyContext.weakTopics.join(", ")}`);
+  if (strategyContext.weakTopics?.length) lines.push(`Weak Areas (address if appropriate): ${strategyContext.weakTopics.join(", ")}`);
   if (strategyContext.strongTopics?.length) lines.push(`Strong Areas: ${strategyContext.strongTopics.join(", ")}`);
   if (strategyContext.recentScores?.length) {
     const avg = Math.round(strategyContext.recentScores.reduce((a, b) => a + b, 0) / strategyContext.recentScores.length);
@@ -131,11 +135,11 @@ OUTPUT SCHEMA (strict JSON):
   // Task instruction
   lines.push("\n=== YOUR TASK ===");
   if (isFirstQuestion) {
-    lines.push("Generate an opening question appropriate to start this interview. For resume-based interviews, open with something relevant to the candidate's actual projects or experience.");
+    lines.push(_buildOpeningInstruction(interviewContext.interviewType, interviewContext.role, candidateContext));
   } else if (isFollowUp) {
-    lines.push("Generate a contextual follow-up question based on the candidate's last answer. Probe the weak areas or interesting points they mentioned.");
+    lines.push("Generate a contextual follow-up question based on the candidate's last answer. Probe the weak areas or interesting points they mentioned. Stay within the interview type and difficulty guidelines above.");
   } else {
-    lines.push("Generate the next most valuable interview question. Avoid repeating covered topics. Address weak areas if appropriate.");
+    lines.push("Generate the next most valuable interview question following the interview type and difficulty guidelines above. Avoid repeating covered topics. Address weak areas if appropriate.");
   }
   lines.push("Return ONLY valid JSON. No markdown. No explanation.");
 
@@ -143,6 +147,59 @@ OUTPUT SCHEMA (strict JSON):
     systemPrompt,
     userPrompt: lines.join("\n"),
   };
+}
+
+// ── Private helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Compact difficulty directive — one line, not a paragraph.
+ */
+function _buildDifficultyGuidance(difficulty) {
+  switch ((difficulty || "medium").toLowerCase()) {
+    case "easy":   return "EASY — fundamental concepts for beginners/juniors. No complex architecture, trade-offs, or senior-level design.";
+    case "hard":   return "HARD — advanced concepts, architecture, edge cases, deep trade-offs for experienced candidates.";
+    default:       return "MEDIUM — practical working knowledge, real-world implementation, moderate complexity.";
+  }
+}
+
+/**
+ * Compact type directive — one or two lines.
+ */
+function _buildTypeGuidance(interviewType, role) {
+  switch ((interviewType || "mixed").toLowerCase()) {
+    case "technical":    return "TECHNICAL — test technical knowledge, implementation, concepts, debugging, architecture. No behavioral questions.";
+    case "behavioral":   return "BEHAVIORAL — ask about past experiences, teamwork, conflict, leadership, decisions. Use STAR framing where natural. No technical deep-dives.";
+    case "role_specific":return `ROLE-SPECIFIC for ${role || "the target role"} — questions directly relevant to the responsibilities and practical scenarios of this role. Draw on candidate's background.`;
+    default:             return "MIXED — alternate between technical and behavioral. Balance both types; do not skew to one.";
+  }
+}
+
+/**
+ * Compact stage directive — one line.
+ */
+function _buildStageGuidance(stage, isFirstQuestion) {
+  if (isFirstQuestion || stage === "opening") {
+    return "OPENING — ask a warm introduction/background question so the candidate can introduce themselves. Do not jump into technical content immediately.";
+  }
+  if (stage === "closing") {
+    return "CLOSING — ask a reflective or wrap-up question appropriate to the interview type.";
+  }
+  return "CORE — ask substantive questions matching the type and difficulty. Probe weak areas, maintain topic diversity.";
+}
+
+/**
+ * Build the opening question task instruction.
+ */
+function _buildOpeningInstruction(interviewType, role, candidateContext) {
+  const roleLabel = role ? `the ${role} role` : "this role";
+  const expLevel  = candidateContext?.experienceLevel || "";
+  const levelHint = expLevel ? ` (candidate level: ${expLevel})` : "";
+
+  if ((interviewType || "").toLowerCase() === "behavioral") {
+    return `Generate an opening introduction question for a behavioral interview${levelHint}. Ask the candidate to introduce themselves and describe their professional background relevant to ${roleLabel}. Generate a natural, welcoming version.`;
+  }
+
+  return `Generate an opening introduction question${levelHint}. Ask the candidate to introduce themselves and summarize their background, skills, or experience most relevant to ${roleLabel}. Keep it welcoming — this sets the tone for the rest of the interview.`;
 }
 
 /**
@@ -174,7 +231,6 @@ function parseQuestionGenerationResponse(raw) {
     // if the model returned plain text instead of JSON
     const rawTrimmed = raw.trim();
     if (rawTrimmed.length > 10 && rawTrimmed.length < 2000) {
-      // Treat the entire response as a question text
       console.warn("[generateQuestion] AI returned non-JSON, treating as plain text question");
       return {
         action: "question",
@@ -213,7 +269,6 @@ function parseQuestionGenerationResponse(raw) {
         reason: parsed.reason || "opening",
       };
     }
-    // If a standalone text field exists (model returned just the question text)
     if (typeof parsed === "string" && parsed.trim().length > 5) {
       return {
         action: "question",

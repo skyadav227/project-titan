@@ -38,14 +38,19 @@ function InterviewCard({ interview, onClick }) {
     ? new Date(interview.completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : new Date(interview.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
+  const hasReport = (interview.overallScore !== null && interview.overallScore !== undefined)
+    || interview.status === "completed";
+  const isActive  = interview.status === "active";
+
   return (
     <button
       type="button"
-      onClick={onClick}
-      className="w-full text-left"
-      aria-label={`View interview from ${dateStr}`}
+      onClick={hasReport ? onClick : undefined}
+      disabled={!hasReport}
+      className={`w-full text-left ${!hasReport ? "cursor-default" : ""}`}
+      aria-label={hasReport ? `View report for interview from ${dateStr}` : `Interview from ${dateStr} — no report available`}
     >
-      <DashboardCard hoverable className="transition-all duration-150">
+      <DashboardCard hoverable={hasReport} className="transition-all duration-150">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
@@ -53,6 +58,9 @@ function InterviewCard({ interview, onClick }) {
                 {interview.role || interview.interviewType || "Interview"}
               </span>
               <StatusBadge status={interview.status} />
+              {isActive && (
+                <span className="text-xs text-white/30 italic">unfinished</span>
+              )}
             </div>
 
             <div className="flex items-center gap-3 flex-wrap text-xs text-white/30">
@@ -65,10 +73,18 @@ function InterviewCard({ interview, onClick }) {
             </div>
           </div>
 
-          {interview.overallScore !== null && interview.overallScore !== undefined && (
+          {hasReport ? (
             <div className="text-right flex-shrink-0">
-              <p className="text-xl font-semibold text-white">{interview.overallScore}</p>
-              <p className="text-xs text-white/25">/100</p>
+              {interview.overallScore !== null && interview.overallScore !== undefined && (
+                <>
+                  <p className="text-xl font-semibold text-white">{interview.overallScore}</p>
+                  <p className="text-xs text-white/25">/100</p>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="text-right flex-shrink-0">
+              <p className="text-xs text-white/20">no report</p>
             </div>
           )}
         </div>
@@ -126,8 +142,15 @@ function HistoryPageContent() {
   useEffect(() => { fetchHistory(page); }, [page, fetchHistory]);
 
   function handleInterviewClick(interview) {
-    // Navigate to session page to view the report
-    navigate(`/interview/session/${interview.id}`);
+    // Only navigate to the report if there is one.
+    // "active" sessions have no report — clicking them does nothing useful.
+    // "abandoned" without a score also has no generated report.
+    const hasReport = interview.overallScore !== null && interview.overallScore !== undefined;
+    if (hasReport || interview.status === "completed") {
+      navigate(`/history/${interview.id}`);
+    }
+    // For sessions without a report (active, failed, abandoned-no-report),
+    // we don't navigate — the card is visually disabled below.
   }
 
   if (loading) {

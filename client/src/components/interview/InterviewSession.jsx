@@ -43,9 +43,13 @@ function useIdempotencyKey() {
 }
 
 // ── Progress bar ──────────────────────────────────────────────────────────────
-function ProgressBar({ questionsCompleted, questionLimit }) {
+function ProgressBar({ questionsCompleted, questionLimit, questionNumber }) {
   if (!questionLimit) return null;
   const pct = Math.min(100, Math.round((questionsCompleted / questionLimit) * 100));
+  // Use the authoritative question number from the backend DTO when available.
+  // questionNumber is set by questionToDto() and is correct for every question
+  // including Q2, Q3 etc. Falls back to questionsCompleted+1 if absent.
+  const displayNumber = questionNumber ?? (questionsCompleted || 0) + 1;
   return (
     <div className="flex items-center gap-3 text-xs text-white/30">
       <div className="flex-1 h-1 rounded-full bg-white/[0.06] overflow-hidden">
@@ -59,7 +63,7 @@ function ProgressBar({ questionsCompleted, questionLimit }) {
           aria-label={`Interview progress ${pct}%`}
         />
       </div>
-      <span>Question {(questionsCompleted || 0) + 1}</span>
+      <span>Question {displayNumber}</span>
     </div>
   );
 }
@@ -329,6 +333,7 @@ export default function InterviewSession() {
             <ProgressBar
               questionsCompleted={session.questionsCompleted}
               questionLimit={session.questionLimit}
+              questionNumber={question?.number}
             />
           </div>
         )}
@@ -357,6 +362,7 @@ export default function InterviewSession() {
           <ProgressBar
             questionsCompleted={session.questionsCompleted}
             questionLimit={session.questionLimit}
+            questionNumber={question?.number}
           />
         </div>
       )}
