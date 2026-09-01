@@ -125,10 +125,19 @@ export function InterviewProvider({ children }) {
   }
 
   // ── Session recovery from URL param ───────────────────────────────────────
-  const restoreSession = useCallback(async (sessionId) => {
+  // getCancelled: optional () => boolean supplied by the caller. When it returns
+  // true the async chain aborts without dispatching — this prevents a page that
+  // has already unmounted (e.g. ReportPage) from overwriting context state that
+  // a newly-mounted page (e.g. InterviewPage at /interview/setup) has already
+  // correctly set via goToSetup().
+  const restoreSession = useCallback(async (sessionId, getCancelled) => {
+    const isCancelled = () => typeof getCancelled === "function" && getCancelled();
+
     dispatch({ type: "SET_LOADING", payload: true });
     try {
       const session = await getInterview(sessionId);
+      if (isCancelled()) return;
+
       dispatch({ type: "SET_SESSION", payload: session });
 
       // Determine UI state from backend session status.
@@ -142,6 +151,7 @@ export function InterviewProvider({ children }) {
         hasReadyReport
       ) {
         const report = await getReport(sessionId).catch(() => null);
+        if (isCancelled()) return;
         dispatch({ type: "SET_REPORT", payload: report });
         // Also store reportSessionId so InterviewPage's guard has it
         dispatch({ type: "SET_REPORT_SESSION_ID", payload: sessionId });
@@ -154,6 +164,7 @@ export function InterviewProvider({ children }) {
         // If this is called from ReportPage (/history/:id), the page will
         // show "no report available" which is correct — this session has no report.
         const { question } = await getCurrentQuestion(sessionId);
+        if (isCancelled()) return;
         if (question) {
           dispatch({ type: "SET_QUESTION", payload: question });
           dispatch({ type: "SET_STATE", payload: "asking" });
@@ -164,11 +175,17 @@ export function InterviewProvider({ children }) {
       }
 
       // created/starting/failed/abandoned-without-report → setup
-      dispatch({ type: "SET_STATE", payload: "idle" });
+      if (!isCancelled()) {
+        dispatch({ type: "SET_STATE", payload: "idle" });
+      }
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: err });
+      if (!isCancelled()) {
+        dispatch({ type: "SET_ERROR", payload: err });
+      }
     } finally {
-      dispatch({ type: "SET_LOADING", payload: false });
+      if (!isCancelled()) {
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
     }
   }, []);
 
@@ -181,6 +198,12 @@ export function InterviewProvider({ children }) {
 
   // ── Create + start interview ───────────────────────────────────────────────
   const beginInterview = useCallback(async (config) => {
+    // RESET first — clear any stale session, question, answerResult, error,
+    // retryInfo, pollingAttemptId, reportSessionId from a previous interview.
+    // Without this, stale state from the last session can bleed into the new one.
+    stopPolling();
+    dispatch({ type: "RESET" });
+
     dispatch({ type: "SET_ERROR", payload: null });
     dispatch({ type: "SET_STATE", payload: "starting" });
     dispatch({ type: "SET_LOADING", payload: true });
@@ -232,7 +255,11 @@ export function InterviewProvider({ children }) {
     } catch (err) {
       dispatch({ type: "SET_ERROR", payload: err });
       dispatch({ type: "SET_LOADING", payload: false });
-      dispatch({ type: "SET_STATE", payload: "asking" }); // allow retry
+      // SET_ERROR already transitions uiState → "error" via the reducer.
+      // Do NOT dispatch SET_STATE("asking") here — that silently overrides the
+      // error state, hiding the failure from the user. The ErrorState component
+      // shows a "Try Again" button that calls clearError(), which returns to
+      // "asking" correctly (Phase 2 fix in clearError).
     }
   }, [state]);
 
@@ -266,7 +293,8 @@ export function InterviewProvider({ children }) {
     } catch (err) {
       dispatch({ type: "SET_ERROR", payload: err });
       dispatch({ type: "SET_LOADING", payload: false });
-      dispatch({ type: "SET_STATE", payload: "asking" }); // allow retry
+      // Same as submitVoiceAnswer: SET_ERROR already sets uiState → "error".
+      // Removing the SET_STATE("asking") override so the error is visible.
     }
   }, [state]);
 
@@ -402,17 +430,30 @@ export function InterviewProvider({ children }) {
   }, [state]);
 
   // ── End interview ──────────────────────────────────────────────────────────
+  // reason="user_ended"  → backend sets status=abandoned, NO report generated.
+  // reason="completed"   → backend sets status=completed, report IS generated.
+  //
+  // Idempotency: if session is already abandoned/completed, endInterview on the
+  // backend returns the current state without error (see interviewService.endInterview).
   const finishInterview = useCallback(async (reason = "user_ended") => {
     const { session } = state;
     if (!session?.id) return;
 
-    dispatch({ type: "SET_LOADING", payload: true });
     stopPolling();
+    dispatch({ type: "SET_LOADING", payload: true });
 
     try {
       await endInterview(session.id, reason);
-      dispatch({ type: "SET_STATE", payload: "completing" });
-      await triggerReportGeneration(session.id);
+
+      if (reason === "user_ended") {
+        // Abandoned — DO NOT generate a report. Go back to setup.
+        dispatch({ type: "RESET" });
+        dispatch({ type: "SET_STATE", payload: "setup" });
+      } else {
+        // Normal completion — generate report.
+        dispatch({ type: "SET_STATE", payload: "completing" });
+        await triggerReportGeneration(session.id);
+      }
     } catch (err) {
       dispatch({ type: "SET_ERROR", payload: err });
     } finally {
@@ -455,18 +496,34 @@ export function InterviewProvider({ children }) {
         }, 3000);
       }
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: { code: "REPORT_GENERATION_FAILED", message: "We couldn't generate your report. Your session data is saved." } });
-      dispatch({ type: "SET_REPORT_SESSION_ID", payload: sessionId });
-      dispatch({ type: "SET_STATE", payload: "report_ready" }); // show what we have
+      // Report generation failed — do NOT set report_ready. The session data is
+      // preserved on the backend; the user can retry from the error state.
+      // Setting report_ready here would falsely claim a report exists and trigger
+      // InterviewPage to navigate to /history/:id where nothing would load.
+      dispatch({ type: "SET_ERROR", payload: { code: "REPORT_GENERATION_FAILED", message: "We couldn't generate your report. Your session data is saved — please try again." } });
     }
   }
 
   // ── Clear error / dismiss ─────────────────────────────────────────────────
+  // Returns to the most sensible previous state given what's in context:
+  //   - active session + current question → "asking" (resume where we were)
+  //   - active session + no question      → "asking" (session active, await next Q)
+  //   - no active session                 → "setup"
+  // Previously this returned to "idle" when no question was set, which left the
+  // user on a blank screen. It also incorrectly returned to "asking" after a
+  // question-generation failure (Q3+), showing the stale Q2 instead of recovering.
   const clearError = useCallback(() => {
-    const prevUiState = state.question ? "asking" : "idle";
+    const { session, question } = state;
+    let prevUiState;
+    if (session?.id && session.status === "active") {
+      prevUiState = "asking"; // session is live — stay in it
+    } else {
+      prevUiState = "setup";  // no active session — go back to setup
+    }
     dispatch({ type: "SET_ERROR", payload: null });
     dispatch({ type: "SET_STATE", payload: prevUiState });
-  }, [state.question]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.session, state.question]);
 
   // ── Reset to idle ─────────────────────────────────────────────────────────
   const resetInterview = useCallback(() => {
@@ -474,8 +531,19 @@ export function InterviewProvider({ children }) {
     dispatch({ type: "RESET" });
   }, []);
 
+  // ── Computed: is an interview actively in progress? ──────────────────────
+  // Used by the navigation guard in InterviewPage to decide whether to prompt
+  // before leaving. "True" for every state where the user is mid-session and
+  // navigating away would silently orphan the backend session.
+  const ONGOING_STATES = new Set([
+    "starting", "asking", "listening", "processing",
+    "showing_report", "retrying", "explaining", "completing",
+  ]);
+  const isInterviewOngoing = ONGOING_STATES.has(state.uiState);
+
   const value = {
     ...state,
+    isInterviewOngoing,
     // Actions
     restoreSession,
     goToSetup,

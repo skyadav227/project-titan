@@ -1087,8 +1087,15 @@ async function generateReport(sessionId, userId) {
     throw err;
   }
 
-  if (!["completed", "abandoned", "active", "failed"].includes(session.status)) {
-    const err = new Error("Interview must be completed before generating a report.");
+  // Only allow report generation for sessions that have meaningful answer data.
+  // "completed" → normal path after all questions answered.
+  // "active"    → early exit / force-complete path (answers exist, session ongoing).
+  // "abandoned" → user explicitly left — no report should be generated (they
+  //               chose to end without a report; generating one here would
+  //               contradict that intent and potentially produce misleading data).
+  // "failed"    → session errored — answers may be partial/corrupt; no report.
+  if (!["completed", "active"].includes(session.status)) {
+    const err = new Error("A report can only be generated for a completed interview session.");
     err.code = "INTERVIEW_NOT_ACTIVE"; err.status = 409;
     throw err;
   }
@@ -1308,6 +1315,7 @@ async function getInterviewHistory(userId, { page = 1, limit = 20, status, mode,
       status:        s.status,
       overallScore:  s.finalReport?.overallScore ?? null,
       questionCount: s.progress?.questionsCompleted || 0,
+      startedAt:     s.startedAt,
       completedAt:   s.completedAt,
       createdAt:     s.createdAt,
     })),

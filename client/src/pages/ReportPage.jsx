@@ -2,7 +2,7 @@
  * ReportPage
  *
  * Displays the final performance report for a specific interview session.
- * Reachable via /reports/:sessionId.
+ * Reachable via /history/:sessionId.
  *
  * This page is the canonical location for all interview reports — both
  * completed interviews and interrupted/abandoned ones with a generated report.
@@ -11,7 +11,7 @@
  * InterviewContext) so no report-rendering logic is duplicated.
  *
  * Flow:
- *   /reports/:sessionId
+ *   /history/:sessionId
  *     → ReportPage mounts
  *     → calls restoreSession(sessionId) from InterviewContext
  *     → InterviewContext loads the session + its report from the backend
@@ -28,17 +28,68 @@ import DashboardCard   from "../components/dashboard/ui/DashboardCard";
 import Button          from "../components/ui/Button";
 import { useInterview } from "../contexts/InterviewContext";
 
+// ── Timestamp formatter (mirrors HistoryPage helper — kept local to avoid
+//    a shared-util file just for two pages) ────────────────────────────────────
+function formatInterviewTimestamp(value) {
+  if (value === null || value === undefined) return "Not available";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "Not available";
+  return d.toLocaleString(undefined, {
+    month:  "short",
+    day:    "numeric",
+    year:   "numeric",
+    hour:   "numeric",
+    minute: "2-digit",
+  });
+}
+
+// ── Interview timeline card ───────────────────────────────────────────────────
+// Displayed at the top of the report, above MasterReport's own sections.
+// Reads startedAt and completedAt directly from the session DTO.
+function InterviewTimeline({ session }) {
+  if (!session) return null;
+  return (
+    <DashboardCard className="dash-card-enter">
+      <p className="text-xs font-semibold uppercase tracking-wider text-white/30 mb-3">
+        Interview Timeline
+      </p>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-baseline gap-2">
+          <span className="text-xs text-white/25 w-14 flex-shrink-0">Started</span>
+          <span className="text-xs text-white/55">
+            {formatInterviewTimestamp(session.startedAt)}
+          </span>
+        </div>
+        <div className="flex items-baseline gap-2">
+          <span className="text-xs text-white/25 w-14 flex-shrink-0">Ended</span>
+          <span className="text-xs text-white/55">
+            {formatInterviewTimestamp(session.completedAt)}
+          </span>
+        </div>
+      </div>
+    </DashboardCard>
+  );
+}
+
 function ReportPageContent() {
   const { sessionId } = useParams();
   const navigate      = useNavigate();
-  const { uiState, isLoading, error, restoreSession } = useInterview();
+  const { uiState, isLoading, error, session, restoreSession } = useInterview();
 
   // Load the session and its report when the page mounts or sessionId changes.
+  //
+  // IMPORTANT: we pass a getCancelled function so that if this page unmounts
+  // before the async restoreSession completes (e.g. user navigates to
+  // /interview/setup before the API responds), the in-flight dispatches are
+  // suppressed. Without this, the stale async callback would overwrite the
+  // "setup" state that InterviewPage's goToSetup() already set, causing
+  // InterviewPage to show skeleton loaders forever or redirect back here.
   useEffect(() => {
-    if (sessionId) {
-      restoreSession(sessionId);
-    }
-    // restoreSession is stable (useCallback with no deps that change)
+    if (!sessionId) return;
+    let cancelled = false;
+    restoreSession(sessionId, () => cancelled);
+    return () => { cancelled = true; };
+    // restoreSession is stable (useCallback with empty deps)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
@@ -88,7 +139,6 @@ function ReportPageContent() {
   }
 
   // ── No report available (session exists but report not generated) ─────────
-  // This handles sessions that are active or were ended without a report.
   if (uiState !== "report_ready") {
     return (
       <div className="max-w-xl mx-auto">
@@ -121,8 +171,45 @@ function ReportPageContent() {
     );
   }
 
-  // ── Report ready — render using the existing MasterReport component ───────
-  return <MasterReport />;
+  // ── Report ready ──────────────────────────────────────────────────────────
+  return (
+    <div className="max-w-2xl mx-auto space-y-4 dash-card-enter">
+      {/* ── Back to History ─────────────────────────────────────────────── */}
+      <div>
+        <button
+          type="button"
+          onClick={() => navigate("/history")}
+          className="
+            flex items-center gap-1.5
+            text-xs text-white/40 hover:text-white/70
+            transition-colors duration-150
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 rounded
+          "
+          aria-label="Back to History"
+        >
+          <svg
+            className="w-3.5 h-3.5 flex-shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          Back to History
+        </button>
+      </div>
+
+      {/* ── Interview timeline ───────────────────────────────────────────── */}
+      <InterviewTimeline session={session} />
+
+      {/* ── Full report (all existing sections) ─────────────────────────── */}
+      <MasterReport />
+    </div>
+  );
 }
 
 export default function ReportPage() {

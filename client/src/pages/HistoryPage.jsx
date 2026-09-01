@@ -16,6 +16,23 @@ import Button          from "../components/ui/Button";
 import SkeletonLoader  from "../components/dashboard/ui/SkeletonLoader";
 import { getInterviewHistory } from "../services/interviewService";
 
+// ── Timestamp formatter ───────────────────────────────────────────────────────
+// Converts a raw timestamp value (ISO string, Date, or null/undefined) into a
+// human-readable string using the browser locale.
+// Returns "Not available" for null/undefined/invalid values — never throws.
+function formatInterviewTimestamp(value) {
+  if (value === null || value === undefined) return "Not available";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "Not available";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day:   "numeric",
+    year:  "numeric",
+    hour:  "numeric",
+    minute: "2-digit",
+  });
+}
+
 // ── Status badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
   const map = {
@@ -32,26 +49,46 @@ function StatusBadge({ status }) {
   );
 }
 
+// ── Timestamp row ─────────────────────────────────────────────────────────────
+// Renders a single "Started / Ended" label + value pair inside a history card.
+function TimestampRow({ label, value, isInProgress = false }) {
+  return (
+    <div className="flex items-baseline gap-1.5">
+      <span className="text-xs text-white/25 w-12 flex-shrink-0">{label}</span>
+      {isInProgress ? (
+        <span className="text-xs text-yellow-400/60">In progress</span>
+      ) : (
+        <span className="text-xs text-white/40">{formatInterviewTimestamp(value)}</span>
+      )}
+    </div>
+  );
+}
+
 // ── Interview history card ────────────────────────────────────────────────────
 function InterviewCard({ interview, onClick }) {
-  const dateStr = interview.completedAt
-    ? new Date(interview.completedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-    : new Date(interview.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-
-  const hasReport = (interview.overallScore !== null && interview.overallScore !== undefined)
+  const hasReport  = (interview.overallScore !== null && interview.overallScore !== undefined)
     || interview.status === "completed";
-  const isActive  = interview.status === "active";
+  const isActive   = interview.status === "active";
+  const isClickable = hasReport || isActive;
+
+  // Derive a display date for aria-label fallback (used even if startedAt is null)
+  const ariaDate = formatInterviewTimestamp(interview.startedAt || interview.completedAt || interview.createdAt);
 
   return (
     <button
       type="button"
-      onClick={hasReport ? onClick : undefined}
-      disabled={!hasReport}
-      className={`w-full text-left ${!hasReport ? "cursor-default" : ""}`}
-      aria-label={hasReport ? `View report for interview from ${dateStr}` : `Interview from ${dateStr} — no report available`}
+      onClick={isClickable ? onClick : undefined}
+      disabled={!isClickable}
+      className={`w-full text-left ${!isClickable ? "cursor-default" : ""}`}
+      aria-label={
+        isActive  ? `Resume interview from ${ariaDate}` :
+        hasReport ? `View report for interview from ${ariaDate}` :
+                    `Interview from ${ariaDate} — no report available`
+      }
     >
-      <DashboardCard hoverable={hasReport} className="transition-all duration-150">
+      <DashboardCard hoverable={isClickable} className="transition-all duration-150">
         <div className="flex items-start justify-between gap-4">
+          {/* ── Left: title, badges, timestamps ── */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
               <span className="text-sm font-medium text-white/80 truncate">
@@ -59,20 +96,33 @@ function InterviewCard({ interview, onClick }) {
               </span>
               <StatusBadge status={interview.status} />
               {isActive && (
-                <span className="text-xs text-white/30 italic">unfinished</span>
+                <span className="text-xs px-2 py-0.5 rounded-full border border-yellow-500/20 text-yellow-400/60">
+                  Resume →
+                </span>
               )}
             </div>
 
-            <div className="flex items-center gap-3 flex-wrap text-xs text-white/30">
+            {/* Secondary meta: type, company, question count */}
+            <div className="flex items-center gap-3 flex-wrap text-xs text-white/30 mb-2.5">
               {interview.company && <span>· {interview.company}</span>}
               <span>{interview.interviewType}</span>
               {interview.questionCount > 0 && (
                 <span>{interview.questionCount} question{interview.questionCount !== 1 ? "s" : ""}</span>
               )}
-              <span>{dateStr}</span>
+            </div>
+
+            {/* Timestamps */}
+            <div className="flex flex-col gap-0.5">
+              <TimestampRow label="Started" value={interview.startedAt} />
+              <TimestampRow
+                label="Ended"
+                value={interview.completedAt}
+                isInProgress={isActive}
+              />
             </div>
           </div>
 
+          {/* ── Right: score or status badge ── */}
           {hasReport ? (
             <div className="text-right flex-shrink-0">
               {interview.overallScore !== null && interview.overallScore !== undefined && (
@@ -81,6 +131,10 @@ function InterviewCard({ interview, onClick }) {
                   <p className="text-xs text-white/25">/100</p>
                 </>
               )}
+            </div>
+          ) : isActive ? (
+            <div className="text-right flex-shrink-0">
+              <p className="text-xs text-yellow-400/50">in progress</p>
             </div>
           ) : (
             <div className="text-right flex-shrink-0">
@@ -142,15 +196,19 @@ function HistoryPageContent() {
   useEffect(() => { fetchHistory(page); }, [page, fetchHistory]);
 
   function handleInterviewClick(interview) {
-    // Only navigate to the report if there is one.
-    // "active" sessions have no report — clicking them does nothing useful.
-    // "abandoned" without a score also has no generated report.
+    if (interview.status === "active") {
+      // Resume the active session — navigate to the live session route.
+      // InterviewPage will call restoreSession(id) which loads the current
+      // question from the backend. No duplicate session is created.
+      navigate(`/interview/session/${interview.id}`);
+      return;
+    }
+    // Completed session with a report
     const hasReport = interview.overallScore !== null && interview.overallScore !== undefined;
     if (hasReport || interview.status === "completed") {
       navigate(`/history/${interview.id}`);
     }
-    // For sessions without a report (active, failed, abandoned-no-report),
-    // we don't navigate — the card is visually disabled below.
+    // Abandoned/failed with no report — card is disabled, click never fires.
   }
 
   if (loading) {

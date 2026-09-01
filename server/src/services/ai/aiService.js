@@ -41,7 +41,11 @@ async function withRetry(fn, maxRetries = AI_MAX_RETRIES) {
       return await fn();
     } catch (err) {
       lastErr = err;
-      const retryable = ["AI_NETWORK_ERROR", "AI_PROVIDER_ERROR", "AI_EMPTY_RESPONSE", "AI_INVALID_JSON"].includes(err.code);
+      // AI_SCHEMA_MISMATCH is included: the model occasionally returns a response
+      // that parses as valid JSON but is missing required keys (e.g. a refusal or
+      // partial output). This is transient — a retry with the same prompt almost
+      // always succeeds. Without this, one bad response = total failure.
+      const retryable = ["AI_NETWORK_ERROR", "AI_PROVIDER_ERROR", "AI_EMPTY_RESPONSE", "AI_INVALID_JSON", "AI_SCHEMA_MISMATCH"].includes(err.code);
       if (!retryable || attempt === maxRetries) break;
       const delay = 1000 * attempt; // simple backoff
       await new Promise(r => setTimeout(r, delay));
