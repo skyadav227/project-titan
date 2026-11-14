@@ -10,6 +10,7 @@
  * During processing: polls GET /resumes/:id/status every 3 seconds.
  */
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
+import { useAuth } from "./AuthContext";
 import {
   getActiveResume,
   getLatestResume,
@@ -19,6 +20,7 @@ import {
   activateResume as apiActivate,
   retryResume as apiRetry,
   deleteResume as apiDelete,
+  getResumeHistory,
 } from "../services/resumeService";
 
 // ── Validation constants (mirrors server) ────────────────────────────────────
@@ -44,87 +46,173 @@ export function ResumeProvider({ children }) {
   const [pendingVersionId, setPendingVersionId] = useState(null);        // version being polled
   const [error, setError] = useState(null);        // { code, message }
   const [isReplacing, setIsReplacing] = useState(false);       // replacement flow active
+  const [restoreError, setRestoreError] = useState(null);     // API failure during restore (distinct from processing error)
+  const restoreRequestIdRef = useRef(0);                      // prevents stale restore requests from overwriting newer state
+
+  const [resumeHistory, setResumeHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const pollRef = useRef(null);
 
-  // ── On mount: restore state from backend ──────────────────────────────────
+  // ── Auth: re-restore on user change ────────────────────────────────────────
+  const { user } = useAuth();
+
+  // ── On mount and on user change: restore state from backend ────────────────
   useEffect(() => {
-    restoreFromBackend();
+    if (user) {
+      restoreFromBackend();
+    } else {
+      // User logged out — invalidate any in-flight restore requests by advancing
+      // the request counter. Any restore call that started before logout will see
+      // requestId !== restoreRequestIdRef.current and silently discard its result,
+      // preventing the previous user's resume data from reappearing after logout.
+      restoreRequestIdRef.current += 1;
+      stopPolling();
+      setResumeVersion(null);
+      setActiveResume(null);
+      setPendingVersionId(null);
+      setProcessingStage(null);
+      setError(null);
+      setRestoreError(null);
+      setUiState("none");
+    }
     return () => stopPolling();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user]);
 
 
   async function restoreFromBackend() {
-    try {
-      const [latest, active] = await Promise.all([
-        getLatestResume(),
-        getActiveResume(),
-      ]);
+    // Use a request ID to prevent stale restore requests from overwriting
+    // newer state (e.g., if the user logs in/out while a restore is in-flight).
+    const requestId = ++restoreRequestIdRef.current;
 
-      // ─────────────────────────────────────────────────────────────────────
-      // No resume exists at all.
-      // ─────────────────────────────────────────────────────────────────────
-      if (!latest && !active) {
-        setResumeVersion(null);
-        setActiveResume(null);
-        setPendingVersionId(null);
-        setError(null);
-        setUiState("none");
-        return;
+    // Fetch active and latest independently so that one failure does NOT
+    // discard the other's result. The previous implementation used Promise.all
+    // which rejected entirely if either call failed, causing the user to see
+    // "no resume" (uiState="none") even when their active resume was fine.
+    let active = null, activeErr = null;
+    let latest = null, latestErr = null;
+
+    try { active = await getActiveResume(); } catch (e) { activeErr = e; }
+    try { latest = await getLatestResume(); } catch (e) { latestErr = e; }
+
+    // Fetch history in parallel (non-blocking — failure must not break the page)
+    fetchHistory().catch(() => {});
+
+    // Stale check — a newer restore request (user change, manual retry) superseded this one
+    if (requestId !== restoreRequestIdRef.current) return;
+
+    // ── Both requests failed — can't determine resume state ─────────────────
+    if (activeErr && latestErr) {
+      setRestoreError({
+        code: "RESTORE_FAILED",
+        message: "Couldn't reach the server. Your resume data is preserved — click retry to try again.",
+      });
+      // On initial mount (uiState still "loading"), transition to "none" so
+      // the UI shows something instead of an infinite skeleton. The
+      // restoreError flag lets a future UI change distinguish "no resume"
+      // from "couldn't verify." On subsequent calls, preserve current state.
+      setUiState(prev => prev === "loading" ? "none" : prev);
+      return;
+    }
+
+    // At least one request succeeded — clear any prior restore error
+    setRestoreError(null);
+
+    // ── Determine the effective active resume ────────────────────────────────
+    // If the active fetch succeeded, use it directly.
+    // If it failed but the latest fetch succeeded AND latest has isActive=true,
+    // we can recover the active resume from the latest endpoint.
+    const effectiveActive = activeErr
+      ? (latest?.isActive ? latest : null)
+      : active;
+
+    if (effectiveActive) {
+      setActiveResume(effectiveActive);
+      setResumeVersion(effectiveActive);
+      setPendingVersionId(null);
+      setProcessingStage(null);
+      setError(null);
+      setUiState("active");
+      // If we recovered from latest because the active fetch failed, note it
+      if (activeErr) {
+        setRestoreError({
+          code: "RESTORE_PARTIAL",
+          message: "Couldn't verify your active resume status directly. Showing your latest confirmed resume.",
+        });
       }
-
-      // ─────────────────────────────────────────────────────────────────────
-      // Always restore the confirmed active resume.
-      //
-      // IMPORTANT:
-      // A newer failed/processing version must NEVER replace the active
-      // resume in the UI.
-      // ─────────────────────────────────────────────────────────────────────
-      if (active) {
-        setActiveResume(active);
-      } else {
-        setActiveResume(null);
+      // If latest fetch failed, warn that a newer version might exist — the user
+      // may have uploaded a new resume from another device that we can't see.
+      // activeErr and latestErr cannot both be set here (both-failed returns early).
+      if (latestErr) {
+        setRestoreError({
+          code: "RESTORE_PARTIAL",
+          message: "Couldn't check for newer resume versions. A newer upload may be processing.",
+        });
       }
+      return;
+    }
 
-      // ─────────────────────────────────────────────────────────────────────
-      // If an active resume exists, it is the primary resume state.
-      //
-      // The latest version may be:
-      //   - processing
-      //   - failed
-      //   - ready_for_review
-      //
-      // but it must not hijack the active resume.
-      // ─────────────────────────────────────────────────────────────────────
-      if (active) {
-        setResumeVersion(active);
-        setPendingVersionId(null);
-        setProcessingStage(null);
-        setError(null);
-        setUiState("active");
-        return;
+    // ── No active resume (confirmed or inferred) ───────────────────────────────
+    // Use latest to determine the current state if it's available
+    if (!latestErr && latest) {
+      setActiveResume(null);
+      applyBackendState(latest);
+      // If the active fetch failed, note the uncertainty — we might have an
+      // active resume that we couldn't fetch
+      if (activeErr) {
+        setRestoreError({
+          code: "RESTORE_PARTIAL",
+          message: "Couldn't verify your active resume status. Showing your latest upload.",
+        });
       }
+      return;
+    }
 
-      // ─────────────────────────────────────────────────────────────────────
-      // No active resume exists.
-      //
-      // Therefore the latest version legitimately determines the current
-      // Resume Intelligence state.
-      // ─────────────────────────────────────────────────────────────────────
-      if (latest) {
-        applyBackendState(latest);
-        return;
-      }
+    // ── No active, no latest (or latest failed) ────────────────────────────────
+    setResumeVersion(null);
+    setActiveResume(null);
+    setPendingVersionId(null);
+    setError(null);
+    setUiState("none");
 
-      // Defensive fallback.
-      setResumeVersion(null);
-      setUiState("none");
-    } catch {
-      // If restoring fails, don't crash the dashboard.
-      setUiState("none");
+    if (latestErr) {
+      // Active was confirmed null but we couldn't check latest — the latest
+      // endpoint may contain a processing, failed, or ready-but-inactive version.
+      // Show a restoration error with retry, not the empty upload screen.
+      setRestoreError({
+        code: "RESTORE_FAILED",
+        message: "Couldn't fetch your latest resume version. You may have a resume that we can't display.",
+      });
+    } else if (activeErr) {
+      // Latest confirmed null (no versions exist) but active fetch failed.
+      // We have evidence of no resume, but active status is uncertain.
+      setRestoreError({
+        code: "RESTORE_PARTIAL",
+        message: "Couldn't verify your active resume status.",
+      });
     }
   }
+
+  // ── Retry restore (exposed for UI to call on network failure) ──────────────
+  const retryRestore = useCallback(async () => {
+    setUiState("loading");
+    await restoreFromBackend();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── History fetch ──────────────────────────────────────────────────────────
+  const fetchHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const data = await getResumeHistory();
+      setResumeHistory(Array.isArray(data) ? data : []);
+    } catch {
+      // silently ignore — history section shows inline error
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
 
 
 
@@ -263,10 +351,11 @@ export function ResumeProvider({ children }) {
       setResumeVersion(activated);
       setIsReplacing(false);
       setUiState("active");
+      fetchHistory().catch(() => {});
     } catch (err) {
       setError({ code: err.code || "ACTIVATION_FAILED", message: err.message || "Something went wrong. Please try again." });
     }
-  }, []);
+  }, [fetchHistory]);
 
   // ── Replacement flow ──────────────────────────────────────────────────────
   const initiateReplacement = useCallback(() => {
@@ -324,10 +413,11 @@ export function ResumeProvider({ children }) {
       setResumeVersion(null);
       setIsReplacing(false);
       setUiState("none");
+      fetchHistory().catch(() => {});
     } catch (err) {
       setError({ code: err.code || "DELETE_FAILED", message: err.message || "Something went wrong. Please try again." });
     }
-  }, [activeResume]);
+  }, [activeResume, fetchHistory]);
 
   // ── Exposed value ─────────────────────────────────────────────────────────
   const value = {
@@ -339,6 +429,9 @@ export function ResumeProvider({ children }) {
     activeResume,
     error,
     isReplacing,
+    restoreError,
+    resumeHistory,
+    historyLoading,
     // Actions
     selectFile,
     clearSelectedFile,
@@ -349,6 +442,8 @@ export function ResumeProvider({ children }) {
     retryProcessing,
     chooseAnotherFile,
     deleteResume: deleteResumeFn,
+    retryRestore,
+    fetchHistory,
   };
 
   return <ResumeContext.Provider value={value}>{children}</ResumeContext.Provider>;

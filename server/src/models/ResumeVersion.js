@@ -171,6 +171,12 @@ const resumeVersionSchema = new mongoose.Schema(
     // Human-readable error message if status === 'failed' (safe for client)
     processingError: { type: String, default: null },
 
+    // ── Soft-deletion marker ──────────────────────────────────────────────
+    // Set to the deletion timestamp when the user removes a resume version.
+    // null means not deleted. Documents without this field are treated as
+    // non-deleted (safe default for existing records).
+    deletedAt: { type: Date, default: null },
+
     // ── Extracted content ─────────────────────────────────────────────────
     // Raw text is stored for potential re-processing but NOT returned to clients
     extractedText: { type: String, default: null, select: false },
@@ -189,6 +195,19 @@ const resumeVersionSchema = new mongoose.Schema(
 
 // ── Compound index: fast lookup of a user's active resume ─────────────────────
 resumeVersionSchema.index({ userId: 1, isActive: 1 });
+
+// ── Unique partial index: enforce one-active-resume-per-user at the DB level ──
+// Only documents where isActive === true are included in this index, so
+// inactive / historical versions are unconstrained.  The named index makes it
+// easy to reference in diagnostics and error messages.
+resumeVersionSchema.index(
+  { userId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { isActive: true },
+    name: "unique_active_resume_per_user",
+  }
+);
 
 // ── Compound index: fast lookup of all versions for a user ───────────────────
 resumeVersionSchema.index({ userId: 1, createdAt: -1 });
