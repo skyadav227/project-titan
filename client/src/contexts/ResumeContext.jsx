@@ -219,6 +219,15 @@ export function ResumeProvider({ children }) {
 
 
   function applyBackendState(version) {
+    // Guard: a deleted version must never be restored as an active UI state.
+    // Treat it as though no eligible resume exists.
+    if (version.deletedAt) {
+      setResumeVersion(null);
+      setActiveResume(null);
+      setUiState("none");
+      return;
+    }
+
     setResumeVersion(version);
 
     if (version.status === "ready" && version.isActive) {
@@ -354,6 +363,12 @@ export function ResumeProvider({ children }) {
       fetchHistory().catch(() => {});
     } catch (err) {
       setError({ code: err.code || "ACTIVATION_FAILED", message: err.message || "Something went wrong. Please try again." });
+      // Only clear the review state if the version was deleted — not for
+      // transient errors where a legitimate ready_for_review state should persist.
+      if (err.code === "RESUME_DELETED") {
+        setResumeVersion(null);
+        setUiState("none");
+      }
     }
   }, [fetchHistory]);
 

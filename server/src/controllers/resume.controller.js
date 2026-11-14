@@ -152,8 +152,9 @@ async function uploadResume(req, res, next) {
 async function getActiveResume(req, res, next) {
   try {
     const doc = await ResumeVersion.findOne({
-      userId:   req.user.id,
-      isActive: true,
+      userId:    req.user.id,
+      isActive:  true,
+      deletedAt: null,
     });
 
     return sendSuccess(res, doc ? safeVersion(doc) : null);
@@ -165,7 +166,8 @@ async function getActiveResume(req, res, next) {
 async function getLatestResume(req, res, next) {
   try {
     const doc = await ResumeVersion.findOne({
-      userId: req.user.id,
+      userId:    req.user.id,
+      deletedAt: null,
     }).sort({ version: -1 });
 
     return sendSuccess(res, doc ? safeVersion(doc) : null);
