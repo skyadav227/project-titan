@@ -29,6 +29,7 @@ const {
   activateResume,
   retryProcessing,
   deleteResume,
+  getResumeHistory,
 } = require("../controllers/resume.controller");
 
 const router = Router();
@@ -40,6 +41,7 @@ router.use(requireAuth);
 router.post("/",       uploadMiddleware, uploadResume);
 router.get("/active", getActiveResume);
 router.get("/latest", getLatestResume);
+router.get("/",        getResumeHistory);
 
 // ── Item routes ───────────────────────────────────────────────────────────────
 router.get   ("/:id",          getResumeById);

@@ -72,3 +72,9 @@ export async function retryResume(id) {
 export async function deleteResume(id) {
   return apiFetch(`/resumes/${id}`, { method: "DELETE" });
 }
+
+/**
+ * Get all resume versions for the current user (history list).
+ * Returns { versions: ResumeVersion[] }
+ */
+export const getResumeHistory = () => apiFetch("/resumes");

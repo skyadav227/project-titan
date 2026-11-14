@@ -26,6 +26,7 @@ import ResumeErrorState   from "../components/resume/ResumeErrorState";
 import ResumeReview       from "../components/resume/ResumeReview";
 import ResumeProfile      from "../components/resume/ResumeProfile";
 import ResumeDropzone     from "../components/resume/ResumeDropzone";
+import ResumeHistory      from "../components/resume/ResumeHistory";
 import DashboardCard      from "../components/dashboard/ui/DashboardCard";
 import Button             from "../components/ui/Button";
 import { useResume as useResumeHook } from "../contexts/ResumeContext";
@@ -106,11 +107,62 @@ function ResumeSkeleton() {
   );
 }
 
+// ── Restore error (both API calls failed — show retry, not upload screen) ─────
+function RestoreError({ error, onRetry }) {
+  return (
+    <div className="max-w-md mx-auto dash-card-enter">
+      <DashboardCard className="flex flex-col items-center gap-5 py-10 text-center">
+        <div className="w-12 h-12 rounded-xl border border-yellow-500/20 bg-yellow-500/10 flex items-center justify-center" aria-hidden="true">
+          <svg className="w-5 h-5 text-yellow-400/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-white/80">
+            {error?.message || "Couldn't load your resume."}
+          </p>
+          <p className="mt-1 text-xs text-white/35">
+            Your resume data is preserved on the server.
+          </p>
+        </div>
+        <Button variant="secondary" size="sm" onClick={onRetry}>
+          Retry
+        </Button>
+      </DashboardCard>
+    </div>
+  );
+}
+
+// ── Restore warning (one API call failed — non-blocking banner) ───────────────
+function RestoreWarning({ error }) {
+  if (!error) return null;
+  return (
+    <div className="max-w-xl mx-auto mb-4 rounded-xl border border-yellow-500/15 bg-yellow-500/[0.03] px-4 py-2.5" role="status">
+      <p className="text-xs text-yellow-400/60">
+        {error.message}
+      </p>
+    </div>
+  );
+}
+
 // ── Main content switcher ─────────────────────────────────────────────────────
 function ResumeContent() {
-  const { uiState, isReplacing } = useResume();
+  const { uiState, isReplacing, restoreError, retryRestore } = useResume();
 
   if (uiState === "loading") return <ResumeSkeleton />;
+
+  // Both API calls failed — show dedicated restore error with retry button,
+  // NOT the upload screen. The user may have a resume we can't reach.
+  if (uiState === "none" && restoreError?.code === "RESTORE_FAILED") {
+    return (
+      <>
+        <PageHeader />
+        <RestoreError error={restoreError} onRetry={retryRestore} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -118,6 +170,9 @@ function ResumeContent() {
 
       {/* Replacement context banner */}
       {isReplacing && <ReplacementBanner />}
+
+      {/* Restore warning for partial failures (non-blocking — shown above content) */}
+      {restoreError && <RestoreWarning error={restoreError} />}
 
       {/* State-driven content */}
       {uiState === "none"             && <ResumeEmptyState />}
@@ -127,6 +182,9 @@ function ResumeContent() {
       {uiState === "ready_for_review" && <ResumeReview />}
       {uiState === "active"           && <ResumeProfile />}
       {uiState === "failed"           && <ResumeErrorState />}
+
+      {/* Resume version history (shown when 2+ versions exist) */}
+      {uiState !== "loading" && <ResumeHistory />}
     </>
   );
 }
