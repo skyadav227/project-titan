@@ -128,6 +128,20 @@ export function getAnswerStatus(sessionId, answerAttemptId) {
 }
 
 /**
+ * Reevaluate a failed answer attempt using its saved transcript.
+ * POST /api/interviews/:id/answers/:answerAttemptId/reevaluate
+ *
+ * Re-runs AI evaluation on the existing failed attempt without creating
+ * a new AnswerAttempt document. Does not consume the user's deliberate
+ * answer-retry quota.
+ */
+export function reevaluateAnswer(sessionId, attemptId) {
+  return apiFetch(`/interviews/${sessionId}/answers/${attemptId}/reevaluate`, {
+    method: "POST",
+  });
+}
+
+/**
  * Request a retry for a question.
  * POST /api/interviews/:id/questions/:questionId/retry
  */

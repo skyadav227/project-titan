@@ -45,6 +45,7 @@ import {
   submitAnswer,
   submitTextAnswer,
   getAnswerStatus,
+  reevaluateAnswer,
   retryQuestion,
   requestExplanation,
   continueAfterExplanation,
@@ -73,6 +74,7 @@ const INITIAL_STATE = {
   isLoading:     false,       // generic async flag
   pollingAttemptId: null,     // answer attempt being polled
   reportSessionId:  null,     // set when report_ready — the session ID to navigate to
+  pendingAttemptId: null,     // set when a submission failed AI evaluation — routes "Try Again" to reevaluate
 };
 
 function reducer(state, action) {
@@ -99,6 +101,8 @@ function reducer(state, action) {
       return { ...state, pollingAttemptId: action.payload };
     case "SET_REPORT_SESSION_ID":
       return { ...state, reportSessionId: action.payload };
+    case "SET_PENDING_ATTEMPT_ID":
+      return { ...state, pendingAttemptId: action.payload };
     case "RESET":
       return { ...INITIAL_STATE };
     default:
@@ -167,6 +171,12 @@ export function InterviewProvider({ children }) {
         if (isCancelled()) return;
         if (question) {
           dispatch({ type: "SET_QUESTION", payload: question });
+          // If the question has a pending failed attempt (AI evaluation failure
+        // on a prior submission), surface its ID so "Try Again" routes to
+        // reevaluateAnswer instead of creating a duplicate submission.
+        if (question.pendingAttempt?.id) {
+            dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: question.pendingAttempt.id });
+          }
           dispatch({ type: "SET_STATE", payload: "asking" });
         } else {
           dispatch({ type: "SET_STATE", payload: "asking" });
@@ -260,6 +270,11 @@ export function InterviewProvider({ children }) {
       // error state, hiding the failure from the user. The ErrorState component
       // shows a "Try Again" button that calls clearError(), which returns to
       // "asking" correctly (Phase 2 fix in clearError).
+      // If the error includes an attemptId (EVALUATION_FAILED), store it so
+      // "Try Again" can route to reevaluateAnswer instead of resubmitting.
+      if (err?.attemptId) {
+        dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: err.attemptId });
+      }
     }
   }, [state]);
 
@@ -295,6 +310,11 @@ export function InterviewProvider({ children }) {
       dispatch({ type: "SET_LOADING", payload: false });
       // Same as submitVoiceAnswer: SET_ERROR already sets uiState → "error".
       // Removing the SET_STATE("asking") override so the error is visible.
+      // If the error includes an attemptId (EVALUATION_FAILED), store it so
+      // "Try Again" can route to reevaluateAnswer instead of resubmitting.
+      if (err?.attemptId) {
+        dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: err.attemptId });
+      }
     }
   }, [state]);
 
@@ -324,6 +344,11 @@ export function InterviewProvider({ children }) {
           stopPolling();
           dispatch({ type: "SET_POLLING", payload: null });
           dispatch({ type: "SET_ERROR", payload: { code: result.processingError?.code || "EVALUATION_FAILED", message: "We couldn't analyze your answer. Please try again." } });
+          // Route Try Again to reevaluateAnswer. The polling closure has attemptId
+          // (the ID we were polling) so we can set pendingAttemptId here.
+          // This prevents the E11000 duplicate-key error that occurs when
+          // the user re-submits the same question that already has attemptNumber:1.
+          dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: attemptId });
         }
         // still processing → keep polling
       } catch {
@@ -341,6 +366,7 @@ export function InterviewProvider({ children }) {
     dispatch({ type: "SET_ERROR", payload: null });
     dispatch({ type: "SET_ANSWER_RESULT", payload: null });
     dispatch({ type: "SET_EXPLANATION", payload: null });
+    dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: null });
 
     try {
       const result = await getNextAction(session.id);
@@ -369,6 +395,8 @@ export function InterviewProvider({ children }) {
 
     dispatch({ type: "SET_LOADING", payload: true });
     dispatch({ type: "SET_ERROR", payload: null });
+    // Clear pending attempt — the user is choosing to give a fresh answer
+    dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: null });
 
     try {
       const result = await retryQuestion(session.id, question.id);
@@ -380,6 +408,51 @@ export function InterviewProvider({ children }) {
       dispatch({ type: "SET_ERROR", payload: err });
     } finally {
       dispatch({ type: "SET_LOADING", payload: false });
+    }
+  }, [state]);
+
+  // ── Reevaluate failed answer attempt ────────────────────────────────────
+  // Re-runs AI evaluation on a previously-failed AnswerAttempt using its saved
+  // transcript. Does NOT create a new attempt or consume the user's retry quota.
+  // Called when the user clicks "Try Again" after an AI evaluation failure and
+  // the context has a pendingAttemptId from the failed response.
+  const reevaluateFailedAttempt = useCallback(async () => {
+    const { session, pendingAttemptId } = state;
+    if (!session?.id || !pendingAttemptId) return;
+
+    dispatch({ type: "SET_STATE", payload: "processing" });
+    dispatch({ type: "SET_LOADING", payload: true });
+    dispatch({ type: "SET_ERROR", payload: null });
+
+    try {
+      const result = await reevaluateAnswer(session.id, pendingAttemptId);
+
+      if (result.status === "completed") {
+        dispatch({ type: "SET_ANSWER_RESULT", payload: result });
+        dispatch({ type: "SET_STATE", payload: "showing_report" });
+        dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: null });
+        dispatch({ type: "SET_LOADING", payload: false });
+      } else {
+        // Should not happen for synchronous V1 — but handle gracefully
+        dispatch({ type: "SET_POLLING", payload: result.id });
+        startPolling(session.id, result.id);
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
+    } catch (err) {
+      dispatch({ type: "SET_ERROR", payload: err });
+      dispatch({ type: "SET_LOADING", payload: false });
+      // Keep pendingAttemptId unless retries are exhausted — the user can try again.
+      // When RETRY_LIMIT_REACHED is returned, clear pendingAttemptId so the UI
+      // stops offering reevaluation and shows a "submit new answer" path instead.
+      // NOT clearing it would loop indefinitely: every click fires reevaluateAnswer
+      // which fails with RETRY_LIMIT_REACHED which dispatches error which shows
+      // Try Again which fires reevaluateAnswer again…
+      if (err.code === "RETRY_LIMIT_REACHED") {
+        dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: null });
+      } else if (err?.attemptId) {
+        // Still retryable — update with the attempt ID from the error (may be same)
+        dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: err.attemptId });
+      }
     }
   }, [state]);
 
@@ -552,6 +625,7 @@ export function InterviewProvider({ children }) {
     submitTextAnswerAction,
     continueToNext,
     retryCurrentQuestion,
+    reevaluateFailedAttempt,
     requestConceptExplanation,
     continueFromExplanation,
     finishInterview,

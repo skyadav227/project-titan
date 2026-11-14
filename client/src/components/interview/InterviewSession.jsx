@@ -20,7 +20,7 @@
  * This component does NOT contain business logic — it delegates everything
  * to InterviewContext and sub-components.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { useInterview } from "../../contexts/InterviewContext";
 import VoiceRecorder    from "./VoiceRecorder";
 import AnswerReport     from "./AnswerReport";
@@ -40,6 +40,48 @@ function useIdempotencyKey() {
   const resetKey = useCallback(() => { keyRef.current = null; }, []);
 
   return { getKey, resetKey };
+}
+
+// ── localStorage draft helper (session/question scoped) ───────────────────────
+// Stores typed answer text so it survives component remount and page refresh.
+// Key: titan_draft_{sessionId}_{questionId} — never contains user ID or answer
+// content in the key itself. Value is the raw typed text.
+// Draft is cleared on successful evaluation, on continueToNext, and on session
+// abandonment. It is NOT cleared on error — that's when it's most needed.
+function draftKey(sessionId, questionId) {
+  return `titan_draft_${sessionId}_${questionId}`;
+}
+
+function readDraft(sessionId, questionId) {
+  try {
+    return localStorage.getItem(draftKey(sessionId, questionId)) || "";
+  } catch {
+    return ""; // localStorage not available (private mode) — degrade gracefully
+  }
+}
+
+function writeDraft(sessionId, questionId, text) {
+  try {
+    if (text) {
+      localStorage.setItem(draftKey(sessionId, questionId), text);
+    } else {
+      localStorage.removeItem(draftKey(sessionId, questionId));
+    }
+  } catch { /* ignore — non-critical */ }
+}
+
+function clearDraft(sessionId, questionId) {
+  try {
+    localStorage.removeItem(draftKey(sessionId, questionId));
+  } catch { /* ignore */ }
+}
+
+function clearAllDraftsForSession(sessionId) {
+  try {
+    const prefix = `titan_draft_${sessionId}_`;
+    const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch { /* ignore */ }
 }
 
 // ── Progress bar ──────────────────────────────────────────────────────────────
@@ -122,7 +164,9 @@ function CompletingState() {
 }
 
 // ── Error state ───────────────────────────────────────────────────────────────
-function ErrorState({ error, onDismiss }) {
+function ErrorState({ error, onDismiss, hasPendingAttempt, onReevaluate, isReevaluating }) {
+  const isRetryExhausted = error?.code === "RETRY_LIMIT_REACHED";
+
   return (
     <DashboardCard className="flex flex-col items-center gap-5 py-10 text-center dash-card-enter">
       <div className="w-12 h-12 rounded-xl border border-red-500/20 bg-red-500/10 flex items-center justify-center" aria-hidden="true">
@@ -134,9 +178,25 @@ function ErrorState({ error, onDismiss }) {
         <p className="text-sm font-medium text-white/80">
           {error?.message || "Something went wrong."}
         </p>
-        <p className="mt-1 text-xs text-white/35">Your progress is preserved.</p>
+        <p className="mt-1 text-xs text-white/35">
+          {hasPendingAttempt && !isRetryExhausted
+            ? "Your answer was saved. Click Try Again to re-evaluate it."
+            : isRetryExhausted
+              ? "Please submit a new answer to continue."
+              : "Your session is preserved."}
+        </p>
       </div>
-      <Button variant="secondary" size="sm" onClick={onDismiss}>Try Again</Button>
+      <div className="flex gap-3">
+        {hasPendingAttempt && !isRetryExhausted ? (
+          <Button variant="secondary" size="sm" onClick={onReevaluate} isLoading={isReevaluating} disabled={isReevaluating}>
+            Try Again
+          </Button>
+        ) : (
+          <Button variant="secondary" size="sm" onClick={onDismiss}>
+            Try Again
+          </Button>
+        )}
+      </div>
     </DashboardCard>
   );
 }
@@ -189,8 +249,9 @@ function QuestionDisplay({ question, isRetry, retryInfo }) {
 // Shown below the VoiceRecorder when microphone STT is not configured.
 // Uses the text directly as the transcript and routes through AI evaluation.
 // Clearly labelled so it is never mistaken for the production voice interface.
-function TextAnswerPanel({ onSubmit, isLoading, disabled }) {
-  const [text, setText] = useState("");
+// Accepts initialText to restore a previously typed answer after remount/refresh.
+function TextAnswerPanel({ onSubmit, isLoading, disabled, initialText = "", onTextChange }) {
+  const [text, setText] = useState(initialText);
   const MIN_CHARS = 10;
 
   function handleSubmit(e) {
@@ -198,7 +259,15 @@ function TextAnswerPanel({ onSubmit, isLoading, disabled }) {
     const trimmed = text.trim();
     if (trimmed.length < MIN_CHARS) return;
     onSubmit(trimmed);
-    setText("");
+    // Do NOT clear text here — keep it until the server confirms success.
+    // The draft is cleared by the parent via clearDraft when uiState transitions
+    // to "showing_report" (success) or the session is abandoned.
+  }
+
+  function handleChange(e) {
+    const newText = e.target.value;
+    setText(newText);
+    if (onTextChange) onTextChange(newText);
   }
 
   const remaining = MIN_CHARS - text.trim().length;
@@ -220,7 +289,7 @@ function TextAnswerPanel({ onSubmit, isLoading, disabled }) {
         <textarea
           rows={4}
           value={text}
-          onChange={e => setText(e.target.value)}
+          onChange={handleChange}
           disabled={isLoading || disabled}
           placeholder="Type your answer here…"
           aria-label="Type your interview answer"
@@ -263,10 +332,12 @@ export default function InterviewSession() {
     retryInfo,
     error,
     isLoading,
+    pendingAttemptId,
     submitVoiceAnswer,
     submitTextAnswerAction,
     continueToNext,
     retryCurrentQuestion,
+    reevaluateFailedAttempt,
     requestConceptExplanation,
     continueFromExplanation,
     finishInterview,
@@ -274,6 +345,36 @@ export default function InterviewSession() {
   } = useInterview();
 
   const { getKey, resetKey } = useIdempotencyKey();
+
+  // ── Draft persistence ──────────────────────────────────────────────────────
+  // Determine the initial text for TextAnswerPanel:
+  //   1. If there's a pending failed attempt with a saved transcript (after
+  //      refresh), use the server-saved transcript — it's authoritative.
+  //   2. Otherwise, use the localStorage draft (survives remount, network error).
+  //   3. If neither, start blank.
+  const serverTranscriptText = question?.pendingAttempt?.transcriptText || "";
+  const draftText = (session?.id && question?.id)
+    ? readDraft(session.id, question.id)
+    : "";
+  const initialAnswerText = serverTranscriptText || draftText;
+
+  // Write draft on text change — but we do this inside TextAnswerPanel via a
+  // callback prop. For now, we pass initialText and let the panel manage its own
+  // state. Draft write happens via the onChange handler below.
+
+  // Clear draft when the answer succeeds (uiState transitions to showing_report)
+  useEffect(() => {
+    if (uiState === "showing_report" && session?.id && question?.id) {
+      clearDraft(session.id, question.id);
+    }
+  }, [uiState, session?.id, question?.id]);
+
+  // Clear all drafts when the session is abandoned (RESET dispatched)
+  useEffect(() => {
+    if (uiState === "setup" && session?.id) {
+      clearAllDraftsForSession(session.id);
+    }
+  }, [uiState, session?.id]);
 
   const handleRecordingComplete = useCallback(({ audioBlob, durationMs }) => {
     const key = getKey();
@@ -284,14 +385,30 @@ export default function InterviewSession() {
   const handleTextSubmit = useCallback((text) => {
     const key = getKey();
     submitTextAnswerAction({ text, idempotencyKey: key });
+    // Do NOT clear the draft here — only clear after the server confirms
+    // success. The draft survives in case the network fails or evaluation
+    // errors, so the user doesn't lose their typed text.
     setTimeout(resetKey, 5000);
   }, [submitTextAnswerAction, getKey, resetKey]);
+
+  // Write draft on text change in TextAnswerPanel
+  const handleTextChange = useCallback((newText) => {
+    if (session?.id && question?.id) {
+      writeDraft(session.id, question.id, newText);
+    }
+  }, [session?.id, question?.id]);
 
   // ── Error state ────────────────────────────────────────────────────────────
   if (uiState === "error") {
     return (
       <div className="max-w-xl mx-auto">
-        <ErrorState error={error} onDismiss={clearError} />
+        <ErrorState
+          error={error}
+          onDismiss={clearError}
+          hasPendingAttempt={!!pendingAttemptId}
+          onReevaluate={reevaluateFailedAttempt}
+          isReevaluating={isLoading}
+        />
       </div>
     );
   }
@@ -387,6 +504,8 @@ export default function InterviewSession() {
         onSubmit={handleTextSubmit}
         isLoading={isLoading}
         disabled={!question?.id}
+        initialText={initialAnswerText}
+        onTextChange={handleTextChange}
       />
 
       {/* End interview */}
