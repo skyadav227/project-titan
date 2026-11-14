@@ -377,7 +377,36 @@ async function getCurrentQuestion(sessionId, userId) {
 
   if (!question || question.status === "answered") return null;
 
-  return questionToDto(question, question.attemptCount + 1);
+  // ── Pending-attempt recovery ───────────────────────────────────────────────
+  // If a prior submission failed (AI evaluation error) the questionId is held in
+  // pendingFailedAttemptId so the frontend can reevaluate instead of resubmitting.
+  // We load transcript.text only — never analysis or scores from a failed attempt.
+  let pendingAttempt = null;
+  if (question.pendingFailedAttemptId) {
+    const pa = await AnswerAttempt.findOne(
+      { _id: question.pendingFailedAttemptId,
+        sessionId: session._id,
+        userId,
+        status: "failed",
+        "processing.retryable": true },
+      { "transcript.text": 1, "processing.retryable": 1, "processing.attempts": 1 }
+    ).lean();
+    if (pa) {
+      pendingAttempt = {
+        id:             pa._id,
+        transcriptText: pa.transcript?.text || null,
+        retryable:      pa.processing?.retryable ?? true,
+        reevalCount:    pa.processing?.attempts  ?? 0,
+      };
+    } else {
+      // Reference stale (attempt may have been reevaluated and succeeded in another tab)
+      // Clear it to avoid polluting future requests — save asynchronously, non-blocking
+      InterviewQuestion.findByIdAndUpdate(question._id, { pendingFailedAttemptId: null })
+        .catch(() => {});
+    }
+  }
+
+  return { ...questionToDto(question, question.attemptCount + 1), pendingAttempt };
 }
 
 // ── Phase 5: Submit Answer ────────────────────────────────────────────────────
@@ -444,7 +473,33 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
     throw err;
   }
 
-  const attemptNumber = question.attemptCount + 1;
+  // ── Failed-attempt guard: route to reevaluation instead of a new attempt ──
+  // If pendingFailedAttemptId is set, a prior submission failed (AI evaluation
+  // error, rate limit, etc.) but its AnswerAttempt was persisted. The correct
+  // recovery path is POST /answers/:id/reevaluate, NOT a new submission.
+  //
+  // Without this guard the caller would compute attemptNumber = attemptCount + 1 = 1,
+  // try to insert a new AnswerAttempt with { questionId, attemptNumber: 1 }, and
+  // hit E11000 because that document already exists in "failed" status.
+  if (question.pendingFailedAttemptId) {
+    const err = new Error("A previous answer attempt needs reevaluation. Use the reevaluate endpoint.");
+    err.code = "EVALUATION_PENDING_REEVALUATION"; err.status = 409;
+    err.attemptId = question.pendingFailedAttemptId.toString();
+    throw err;
+  }
+
+  // ── Compute the next attempt number from persisted data, not in-memory state ──
+  // question.attemptCount is only incremented in the success path. If a prior
+  // attempt failed (evaluation or transcription) the in-memory count is stale.
+  // Count actual persisted attempts so attemptNumber is always unique, even when
+  // attemptCount was not incremented by the previous failure.
+  //
+  // Using countDocuments is safe here because:
+  //  - We are the only writer for this questionId (session ownership + status check above)
+  //  - The unique index { questionId, attemptNumber } will still catch any race
+  //  - If a race somehow produces the same number, E11000 is the hard safety net
+  const existingAttemptCount = await AnswerAttempt.countDocuments({ questionId: question._id });
+  const attemptNumber = existingAttemptCount + 1;
   const isRetry = attemptNumber > 1;
 
   // Get previous attempt for improvement comparison
@@ -541,8 +596,20 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
         session.processing.retryable    = true;
         await session.save();
 
+        // Record the failed attempt so the frontend can discover it after refresh
+        // and offer reevaluation instead of a duplicate submission.
+        // Note: for TRANSCRIPTION_FAILED the transcript is empty, so reevaluateAnswer
+        // will reject this attempt (INVALID_ANSWER) — but pendingFailedAttemptId
+        // still ensures the frontend shows the correct error path rather than
+        // silently permitting a resubmission that would hit E11000.
+        await InterviewQuestion.updateOne(
+          { _id: question._id },
+          { pendingFailedAttemptId: attempt._id }
+        ).catch(() => {});
+
         const err = new Error("We couldn't transcribe your audio. Please try again.");
         err.code = "TRANSCRIPTION_FAILED"; err.status = 502;
+        err.attemptId = attempt._id.toString();
         throw err;
       }
 
@@ -609,8 +676,20 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
       session.processing.errorCode = "EVALUATION_FAILED";
       await session.save();
 
+      // Record the failed attempt on the question so the frontend can discover it
+      // after a page refresh (getCurrentQuestion returns pendingAttempt).
+      // Use updateOne so we don't reload the full question document.
+      await InterviewQuestion.updateOne(
+        { _id: question._id },
+        { pendingFailedAttemptId: attempt._id }
+      );
+
       const err = new Error("We couldn't evaluate your answer. Please try again.");
       err.code = "EVALUATION_FAILED"; err.status = 502;
+      // Attach the attempt ID so the controller can include it in the error response.
+      // The frontend uses this to route Try Again to reevaluateAnswer instead of
+      // creating a new submission — preventing the E11000 duplicate key error.
+      err.attemptId = attempt._id.toString();
       throw err;
     }
 
@@ -660,6 +739,10 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
     // 7. Update question
     question.attemptCount  = attemptNumber;
     question.latestAttemptId = attempt._id;
+    // Clear any stale pending-failed reference — this attempt succeeded.
+    // Do NOT touch latestAttemptId on the failure path; this is the only place
+    // latestAttemptId is assigned, preserving its "most recent successful attempt" semantics.
+    question.pendingFailedAttemptId = null;
     question.status        = "answered";
     question.completedAt   = new Date();
     await question.save();
@@ -722,6 +805,300 @@ async function getAnswerStatus(sessionId, answerAttemptId, userId) {
     : null;
 
   return answerAttemptToResult(attempt, question);
+}
+
+// ── Phase 5b: Reevaluate Failed Answer Attempt ───────────────────────────────
+
+/**
+ * Re-run AI evaluation on an existing failed AnswerAttempt, reusing its saved
+ * transcript without creating a new document or consuming the user's deliberate
+ * answer-retry quota (question.attemptCount / question.maxRetries).
+ *
+ * Bounded by attempt.processing.attempts (unused until now) to prevent infinite
+ * reevaluation loops. The bound uses AI_MAX_RETRIES from env (default 3) — this
+ * is the same value that bounds automatic provider-level retries in withRetry(),
+ * so total evaluation attempts for one answer are at most AI_MAX_RETRIES
+ * (automatic) × AI_MAX_RETRIES (manual reevaluation) before the user is told
+ * to submit a fresh answer. No .env change required.
+ *
+ * Atomic session + attempt claims via findOneAndUpdate prevent concurrent
+ * reevaluation from double-running the AI call. Lock is released in all paths
+ * (success, failure, unexpected error).
+ *
+ * @param {string} sessionId
+ * @param {string} attemptId
+ * @param {string} userId
+ * @returns {Promise<object>} Answer attempt result (same shape as submitAnswer)
+ */
+async function reevaluateAnswer(sessionId, attemptId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
+  assertValidObjectId(attemptId,  "Answer attempt");
+
+  // ── 1. Atomic session lock claim ────────────────────────────────────────────
+  // findOneAndUpdate with { "processing.operation": null } in the filter is
+  // atomic at the document level — MongoDB guarantees exactly one of two
+  // concurrent requests gets the lock; the other gets null and a 409.
+  const session = await InterviewSession.findOneAndUpdate(
+    { _id: sessionId, userId, status: "active", "processing.operation": null },
+    {
+      $set: {
+        "processing.operation":          "processing_answer",
+        "processing.operationStartedAt": new Date(),
+        "processing.operationId":        attemptId,
+        "processing.errorCode":          null,
+      },
+    },
+    { new: true }
+  );
+  if (!session) {
+    // Either session not found/not active, or another operation holds the lock.
+    // Distinguish for a clearer error:
+    const existing = await InterviewSession.findOne({ _id: sessionId, userId });
+    if (!existing) {
+      const err = new Error("Interview session not found.");
+      err.code = "INTERVIEW_NOT_FOUND"; err.status = 404;
+      throw err;
+    }
+    if (existing.status !== "active") {
+      // Abandoned/completed/failed sessions cannot be reevaluated.
+      const err = new Error(`Interview is not active (status: ${existing.status}).`);
+      err.code = "INTERVIEW_NOT_ACTIVE"; err.status = 409;
+      throw err;
+    }
+    const err = new Error("An answer is already being processed for this session.");
+    err.code = "ANSWER_PROCESSING"; err.status = 409;
+    throw err;
+  }
+
+  // ── 2. Atomic attempt claim: failed → analyzing ─────────────────────────────
+  // Filter on status:"failed" + retryable:true + attempts < AI_MAX_RETRIES so
+  // a concurrent reevaluate call on the same attempt gets null (already claimed)
+  // or gets rejected (exhausted retries). $inc processing.attempts is atomic.
+  const { AI_MAX_RETRIES } = require("../config/env");
+  const maxReeval = AI_MAX_RETRIES; // reuse existing env-configured bound
+
+  const attempt = await AnswerAttempt.findOneAndUpdate(
+    {
+      _id: attemptId,
+      sessionId: session._id,
+      userId,
+      status: "failed",
+      "processing.retryable": true,
+      "processing.attempts": { $lt: maxReeval },
+    },
+    {
+      $set: {
+        status: "analyzing",
+        "processing.errorCode":   null,
+        "processing.errorMessage": null,
+      },
+      $inc: { "processing.attempts": 1 },
+    },
+    { new: true }
+  );
+  if (!attempt) {
+    // Release the session lock — we claimed it but can't proceed.
+    await InterviewSession.updateOne(
+      { _id: session._id },
+      { $set: { "processing.operation": null, "processing.operationId": null } }
+    ).catch(() => {});
+
+    // Determine the reason for a clearer error
+    const existingAttempt = await AnswerAttempt.findOne({ _id: attemptId, sessionId: session._id, userId });
+    if (!existingAttempt) {
+      const err = new Error("Answer attempt not found.");
+      err.code = "ANSWER_NOT_FOUND"; err.status = 404;
+      throw err;
+    }
+    if (existingAttempt.status === "completed") {
+      const err = new Error("This answer has already been evaluated successfully.");
+      err.code = "QUESTION_ALREADY_ANSWERED"; err.status = 409;
+      throw err;
+    }
+    if (existingAttempt.processing?.attempts >= maxReeval) {
+      const err = new Error("Maximum reevaluation attempts reached. Please submit a new answer.");
+      err.code = "RETRY_LIMIT_REACHED"; err.status = 409;
+      throw err;
+    }
+    // Already being reevaluated by another request
+    const err = new Error("This answer is already being reevaluated.");
+    err.code = "ANSWER_PROCESSING"; err.status = 409;
+    throw err;
+  }
+
+  // ── 3. Validate transcript exists ──────────────────────────────────────────
+  const transcriptText = attempt.transcript?.text || "";
+  if (!transcriptText.trim()) {
+    // No transcript to reevaluate — release locks and tell the user to resubmit.
+    await AnswerAttempt.updateOne(
+      { _id: attempt._id },
+      { $set: { status: "failed", "processing.errorCode": "NO_TRANSCRIPT",
+                    "processing.errorMessage": "No transcript saved for this attempt.",
+                    "processing.retryable": false } }
+    ).catch(() => {});
+    await InterviewSession.updateOne(
+      { _id: session._id },
+      { $set: { "processing.operation": null, "processing.operationId": null } }
+    ).catch(() => {});
+    const err = new Error("No saved answer was found to reevaluate. Please submit your answer again.");
+    err.code = "INVALID_ANSWER"; err.status = 400;
+    throw err;
+  }
+
+  // ── 4. Load question + rebuild evaluation context ───────────────────────────
+  const question = await InterviewQuestion.findOne({
+    _id: attempt.questionId, sessionId: session._id, userId,
+  });
+  if (!question) {
+    // Orphaned attempt — release and fail safely
+    await AnswerAttempt.updateOne(
+      { _id: attempt._id },
+      { $set: { status: "failed", "processing.errorCode": "QUESTION_NOT_FOUND" } }
+    ).catch(() => {});
+    await InterviewSession.updateOne(
+      { _id: session._id },
+      { $set: { "processing.operation": null, "processing.operationId": null } }
+    ).catch(() => {});
+    const err = new Error("Question not found.");
+    err.code = "QUESTION_NOT_FOUND"; err.status = 404;
+    throw err;
+  }
+
+  try {
+    // Recompute speech metrics from the saved transcript (deterministic)
+    const speechMetrics = speechService.computeSpeechMetrics({
+      transcript:     transcriptText,
+      durationMs:     attempt.audio?.durationMs ?? null,
+      audioDurationMs: attempt.audio?.durationMs ?? null,
+    });
+
+    const snapshot = session.interviewContextSnapshot || {};
+    const evalCtx = {
+      question: {
+        text:       question.text,
+        category:   question.category,
+        topic:      question.generationContext?.topic || question.category,
+        difficulty: question.difficulty,
+      },
+      transcript: { text: transcriptText, language: attempt.transcript?.language || "en" },
+      speechMetrics,
+      interviewContext: {
+        interviewType: session.configuration?.interviewType,
+        role:          snapshot.targetRole || session.configuration?.targetRole,
+        company:      snapshot.company   || session.configuration?.company,
+      },
+      candidateContext: {
+        experienceLevel: snapshot.experienceLevel || "",
+      },
+    };
+
+    // ── 5. Run AI evaluation (withRetry inside aiService.evaluateAnswer) ────────
+    const evaluation = await aiService.evaluateAnswer(evalCtx);
+
+    // ── 6. Merge + persist success ─────────────────────────────────────────────
+    const mergedAnalysis = {
+      ...evaluation,
+      speech: speechMetrics,
+      fillerWords: {
+        total:       speechMetrics.fillerWordCount ?? 0,
+        occurrences: speechMetrics.fillerWordOccurrences || [],
+      },
+    };
+
+    // Improvement comparison: if this is a retry attempt (attemptNumber > 1),
+    // compare against the previous completed attempt.
+    let improvement = {};
+    if (attempt.isRetry) {
+      const prevAttempt = await AnswerAttempt.findOne(
+        { questionId: question._id, attemptNumber: attempt.attemptNumber - 1, status: "completed" },
+        { "analysis.overallScore": 1, "analysis.communication": 1,
+          "analysis.technicalAccuracy": 1, "analysis.structure": 1 }
+      );
+      if (prevAttempt?.analysis?.overallScore !== undefined) {
+        const prevScore = prevAttempt.analysis.overallScore;
+        const newScore  = evaluation.overallScore;
+        const scoreDelta = newScore !== null && prevScore !== null ? newScore - prevScore : null;
+        improvement = {
+          previousAttemptId:  prevAttempt._id,
+          scoreDelta,
+          communicationDelta: _delta(evaluation.communication,    prevAttempt.analysis?.communication),
+          technicalDelta:     _delta(evaluation.technicalAccuracy, prevAttempt.analysis?.technicalAccuracy),
+          structureDelta:     _delta(evaluation.structure,         prevAttempt.analysis?.structure),
+          improved:           scoreDelta !== null ? scoreDelta > 0 : null,
+          improvedAreas:      _identifyImprovedAreas(evaluation, prevAttempt.analysis),
+          remainingIssues:    evaluation.weaknesses || [],
+        };
+      }
+    }
+
+    attempt.analysis      = mergedAnalysis;
+    attempt.answerQuality = _qualityFromClassification(evaluation.classification);
+    attempt.improvement   = improvement;
+    attempt.status        = "completed";
+    attempt.completedAt   = new Date();
+    attempt.aiMetadata    = {
+      provider:        "openrouter",
+      model:           process.env.AI_MODEL || "",
+      promptVersion:   "evaluation-v1",
+      analysisVersion: "v1",
+      generatedAt:     new Date(),
+    };
+    await attempt.save();
+
+    // ── 7. Update question + session ───────────────────────────────────────────
+    // latestAttemptId is set ONLY here (success path) — preserves its semantics.
+    // pendingFailedAttemptId is cleared because this attempt now succeeded.
+    // attemptCount is NOT incremented — we reused the existing attempt.
+    // The question may have been counted as completed before (if a previous
+    // attempt succeeded then the user retried). Track whether this question was
+    // already counted before we flip status to "answered".
+    const wasAlreadyAnswered = question.status === "answered";
+    const wasAlreadyCounted  = wasAlreadyAnswered ||
+      (session.progress.lastCompletedQuestionId &&
+       session.progress.lastCompletedQuestionId.equals(question._id));
+
+    question.latestAttemptId         = attempt._id;
+    question.pendingFailedAttemptId  = null;
+    question.status                   = "answered";
+    question.completedAt               = new Date();
+    await question.save();
+
+    // Only increment questionsCompleted if this question wasn't already counted.
+    // For the common case (first attempt failed, reevaluation succeeds), the
+    // question was never "answered" so questionsCompleted wasn't incremented.
+    if (!wasAlreadyCounted) {
+      session.progress.questionsCompleted = (session.progress.questionsCompleted || 0) + 1;
+    }
+    session.progress.lastCompletedQuestionId = question._id;
+    session.processing.operation             = null;
+    session.processing.operationId            = null;
+    session.processing.errorCode              = null;
+    session.lastActivityAt                    = new Date();
+    await session.save();
+
+    return answerAttemptToResult(attempt, question);
+
+  } catch (evalErr) {
+    // ── 8. Evaluation failed again — release locks, mark attempt failed ──────
+    console.error("[interviewService] Reevaluation failed:", evalErr.message);
+    attempt.status = "failed";
+    attempt.processing.errorCode    = evalErr.code    || "EVALUATION_FAILED";
+    attempt.processing.errorMessage = evalErr.message || "Reevaluation failed.";
+    // Still retryable if we haven't exhausted attempts
+    attempt.processing.retryable    = (attempt.processing.attempts || 0) < maxReeval;
+    await attempt.save().catch(() => {});
+
+    // Release the session lock
+    await InterviewSession.updateOne(
+      { _id: session._id },
+      { $set: { "processing.operation": null, "processing.operationId": null } }
+    ).catch(() => {});
+
+    const err = new Error("We couldn't evaluate your answer. Please try again.");
+    err.code = "EVALUATION_FAILED"; err.status = 502;
+    err.attemptId = attempt._id.toString();
+    throw err;
+  }
 }
 
 // ── Phase 6: Generate Next Action ─────────────────────────────────────────────
@@ -936,6 +1313,10 @@ async function retryQuestion(sessionId, questionId, userId) {
   // Reset question status to allow another answer
   question.status    = "asked";
   question.completedAt = null;
+  // Clear any stale pending-failed reference — the user is choosing to give a
+  // fresh answer via retryQuestion (deliberate answer retry), not reevaluating
+  // the AI's failure on the previous one.
+  question.pendingFailedAttemptId = null;
   await question.save();
 
   // Decrement questionsCompleted so the retry answer is not skipped
@@ -1486,6 +1867,7 @@ module.exports = {
   getCurrentQuestion,
   submitAnswer,
   getAnswerStatus,
+  reevaluateAnswer,
   getNextAction,
   retryQuestion,
   requestExplanation,

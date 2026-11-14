@@ -45,6 +45,13 @@ async function withRetry(fn, maxRetries = AI_MAX_RETRIES) {
       // that parses as valid JSON but is missing required keys (e.g. a refusal or
       // partial output). This is transient — a retry with the same prompt almost
       // always succeeds. Without this, one bad response = total failure.
+      // AI_RATE_LIMIT is explicitly excluded: HTTP 429 means the free-tier daily
+      // quota is exhausted. Retrying immediately would waste the remaining quota
+      // and loop. The frontend handles 429 as a non-retryable failure.
+      // AI_REASONING_OVERFLOW is explicitly excluded: the reasoning model consumed
+      // its entire token budget on internal chain-of-thought and produced no
+      // final content. Retrying the identical request will reproduce the same
+      // overflow — it is not a transient error and does not benefit from retry.
       const retryable = ["AI_NETWORK_ERROR", "AI_PROVIDER_ERROR", "AI_EMPTY_RESPONSE", "AI_INVALID_JSON", "AI_SCHEMA_MISMATCH"].includes(err.code);
       if (!retryable || attempt === maxRetries) break;
       const delay = 1000 * attempt; // simple backoff

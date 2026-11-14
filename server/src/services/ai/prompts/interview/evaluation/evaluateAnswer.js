@@ -22,54 +22,19 @@ function buildEvaluationPrompt(ctx) {
 
   const systemPrompt = `You are an expert interview evaluator for TITAN, an AI interview training platform.
 
-Your task is to evaluate a candidate's interview answer objectively and return structured feedback.
+Evaluate the candidate's answer and return structured JSON feedback.
 
-CRITICAL RULES:
-- Evaluate ONLY what the candidate actually said — never invent or assume additional knowledge
-- Score dimensions that are relevant to the question type — omit irrelevant ones (use null)
-- Be honest: do not inflate scores; do not be unnecessarily harsh
-- Feedback must be specific and actionable — not generic
-- Never claim to measure psychological states (confidence, anxiety, nervousness)
-- Return ONLY valid JSON matching the schema — no markdown, no explanation
+RULES:
+- Evaluate ONLY what the candidate actually said — never invent information
+- Score dimensions relevant to the question; use null for inapplicable ones
+- Be honest and specific — not generic
+- Return ONLY valid JSON — no markdown, no text outside the JSON
 
-CLASSIFICATION GUIDE:
-- correct: core answer is accurate and complete
-- mostly_correct: core correct but missing 1–2 important details
-- partially_correct: some important info correct, but significant gaps or misconceptions
-- incorrect: central concept or conclusion is wrong
-- insufficient: not enough information to evaluate meaningfully
-- off_topic: answer does not address the question
+CLASSIFICATION: correct | mostly_correct | partially_correct | incorrect | insufficient | off_topic
+SCORES: 0–100 (null = not applicable)
 
-SCORE SCALE: 0–100 (null = dimension not applicable to this question type)
-
-OUTPUT SCHEMA (strict JSON):
-{
-  "overallScore": <0-100>,
-  "technicalAccuracy": <0-100 or null>,
-  "relevance": <0-100>,
-  "communication": <0-100>,
-  "clarity": <0-100>,
-  "structure": <0-100>,
-  "completeness": <0-100>,
-  "problemSolving": <0-100 or null>,
-  "classification": "<correct|mostly_correct|partially_correct|incorrect|insufficient|off_topic>",
-  "strengths": ["<specific strength>"],
-  "weaknesses": ["<specific weakness>"],
-  "missingPoints": ["<important concept not mentioned>"],
-  "suggestions": ["<actionable improvement>"],
-  "technicalFeedback": {
-    "correctness": "<brief assessment of technical accuracy>",
-    "missingConcepts": ["<concept>"],
-    "misconceptions": ["<misconception if any>"],
-    "improvedExplanation": "<how a strong answer would approach this>"
-  },
-  "communicationFeedback": {
-    "observations": ["<observable communication pattern>"],
-    "suggestions": ["<actionable communication improvement>"]
-  },
-  "retryRecommended": <true|false>,
-  "explanationRecommended": <true|false>
-}`;
+REQUIRED OUTPUT (return all fields):
+{"overallScore":<0-100>,"technicalAccuracy":<0-100|null>,"relevance":<0-100>,"communication":<0-100>,"clarity":<0-100>,"structure":<0-100>,"completeness":<0-100>,"problemSolving":<0-100|null>,"classification":"<value>","strengths":["<str>"],"weaknesses":["<str>"],"missingPoints":["<str>"],"suggestions":["<str>"],"retryRecommended":<bool>,"explanationRecommended":<bool>,"technicalFeedback":{"correctness":"<str>","missingConcepts":[],"misconceptions":[],"improvedExplanation":"<str>"},"communicationFeedback":{"observations":[],"suggestions":[]}}`;
 
   const lines = [];
 
@@ -104,9 +69,7 @@ OUTPUT SCHEMA (strict JSON):
 
   lines.push("\n=== YOUR TASK ===");
   lines.push("Evaluate the candidate's answer against the question. Be specific about what was said.");
-  lines.push("Set retryRecommended=true if the answer shows a meaningful improvement opportunity.");
-  lines.push("Set explanationRecommended=true if there is a significant knowledge gap worth addressing.");
-  lines.push("Return ONLY valid JSON. No markdown. No explanation.");
+  lines.push("Return ONLY valid JSON. No markdown.");
 
   return {
     systemPrompt,
@@ -138,9 +101,18 @@ function parseEvaluationResponse(raw) {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    const err = new Error("AI returned invalid JSON for answer evaluation.");
-    err.code = "AI_INVALID_JSON";
-    throw err;
+    // The free-tier model frequently truncates its output mid-JSON
+    // (finish_reason: "length"). Attempt to repair by finding the last
+    // position where the JSON was still structurally valid — i.e. scan
+    // backwards from the end to find the last complete top-level "}" and
+    // try parsing the substring up to that point.
+    parsed = _tryRepairTruncatedJson(cleaned);
+    if (!parsed) {
+      const err = new Error("AI returned invalid JSON for answer evaluation.");
+      err.code = "AI_INVALID_JSON";
+      throw err;
+    }
+    console.warn("[parseEvaluationResponse] Recovered from truncated JSON — partial fields will be filled with defaults.");
   }
 
   // Required field check — if overallScore is missing but we have a JSON object,
@@ -197,7 +169,68 @@ function parseEvaluationResponse(raw) {
   parsed.retryRecommended       = Boolean(parsed.retryRecommended);
   parsed.explanationRecommended = Boolean(parsed.explanationRecommended);
 
+  // ── Minimum completeness check after repair ──────────────────────────────
+  // A truncated response can produce a valid-but-hollow evaluation: correct
+  // overallScore and classification, but all feedback arrays empty and
+  // technicalFeedback.correctness empty. This is not a fabricated score, but
+  // it IS a meaningless evaluation the user cannot act on.
+  //
+  // Require at least one of the following to contain substantive content:
+  //   • a non-empty strengths/weaknesses/missingPoints/suggestions array
+  //   • a non-empty technicalFeedback.correctness string
+  //
+  // If none are present the response was truncated too early. Throw
+  // AI_SCHEMA_MISMATCH so the bounded retry runs rather than accepting a
+  // score-only shell as a completed evaluation.
+  //
+  // This check runs AFTER normalization so that the default-filling above
+  // has already applied — we are testing for post-normalization emptiness.
+  const hasTextualFeedback = (
+    (Array.isArray(parsed.strengths)     && parsed.strengths.length     > 0) ||
+    (Array.isArray(parsed.weaknesses)    && parsed.weaknesses.length    > 0) ||
+    (Array.isArray(parsed.missingPoints) && parsed.missingPoints.length > 0) ||
+    (Array.isArray(parsed.suggestions)   && parsed.suggestions.length   > 0) ||
+    (typeof parsed.technicalFeedback?.correctness === "string" &&
+     parsed.technicalFeedback.correctness.trim().length > 0)
+  );
+
+  if (!hasTextualFeedback) {
+    const err = new Error("AI evaluation is incomplete: scores present but no feedback text. Retrying may produce a complete response.");
+    err.code = "AI_SCHEMA_MISMATCH";
+    throw err;
+  }
+
   return parsed;
+}
+
+/**
+ * Attempt to repair a truncated JSON string by scanning backwards for the
+ * last syntactically valid JSON object.
+ *
+ * Free-tier models frequently return finish_reason:"length" which cuts off
+ * the JSON mid-way. This tries to salvage the fields that were emitted before
+ * truncation so the caller can still derive a partial evaluation rather than
+ * discarding everything.
+ *
+ * Returns null if no valid object could be recovered.
+ *
+ * @param {string} s - Potentially truncated JSON string
+ * @returns {object|null}
+ */
+function _tryRepairTruncatedJson(s) {
+  if (!s || typeof s !== "string") return null;
+  // Walk backwards through the string, trying each position where "}" appears
+  // as a potential end-of-object marker.
+  let pos = s.lastIndexOf("}");
+  while (pos > 0) {
+    const candidate = s.slice(0, pos + 1);
+    try {
+      const obj = JSON.parse(candidate);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) return obj;
+    } catch { /* not valid at this boundary, keep scanning */ }
+    pos = s.lastIndexOf("}", pos - 1);
+  }
+  return null;
 }
 
 module.exports = { buildEvaluationPrompt, parseEvaluationResponse };

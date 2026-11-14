@@ -180,6 +180,21 @@ async function endInterview(req, res, next) {
   }
 }
 
+// ── POST /api/interviews/:id/answers/:answerAttemptId/reevaluate ──────────────
+async function reevaluateAnswer(req, res, next) {
+  try {
+    const result = await interviewService.reevaluateAnswer(
+      req.params.id,
+      req.params.answerAttemptId,
+      req.user.id
+    );
+    // Return 200 (completed synchronously) — reevaluation is always synchronous in V1
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    return _handleDomainError(err, res, next);
+  }
+}
+
 // ── POST /api/interviews/:id/report ───────────────────────────────────────────
 async function generateReport(req, res, next) {
   try {
@@ -246,6 +261,7 @@ function _handleDomainError(err, res, next) {
     DUPLICATE_ANSWER:           409,
     ANSWER_PROCESSING:          409,
     RETRY_LIMIT_REACHED:        409,
+    EVALUATION_PENDING_REEVALUATION: 409,
     TRANSCRIPTION_FAILED:       502,
     EVALUATION_FAILED:          502,
     QUESTION_GENERATION_FAILED: 502,
@@ -253,6 +269,8 @@ function _handleDomainError(err, res, next) {
     REPORT_GENERATION_FAILED:   502,
     // AI provider errors — all map to 502 (upstream failure)
     AI_CONFIG_ERROR:            500,
+    AI_RATE_LIMIT:              503,  // 429 from provider → 503 to client (quota exhausted, retry later)
+    AI_REASONING_OVERFLOW:      503,  // reasoning model consumed entire token budget → non-retryable, retry manually
     AI_SCHEMA_MISMATCH:         502,
     AI_INVALID_JSON:            502,
     AI_NETWORK_ERROR:           502,
@@ -276,6 +294,23 @@ function _handleDomainError(err, res, next) {
     const safeMessage = (err.code === "AI_CONFIG_ERROR")
       ? "The AI service is not configured. Please contact support."
       : err.message;
+    // For EVALUATION_FAILED, TRANSCRIPTION_FAILED, and EVALUATION_PENDING_REEVALUATION,
+    // include the attemptId so the frontend can route "Try Again" to reevaluateAnswer
+    // instead of creating a duplicate submission (which would hit E11000).
+    if ((err.code === "EVALUATION_FAILED" || err.code === "TRANSCRIPTION_FAILED" ||
+         err.code === "EVALUATION_PENDING_REEVALUATION") && err.attemptId) {
+      return sendError(res, err.code, safeMessage, STATUS_MAP[err.code], { attemptId: err.attemptId });
+    }
+    // For AI_RATE_LIMIT, include retryAfterMs so the frontend can display a countdown.
+    if (err.code === "AI_RATE_LIMIT") {
+      return sendError(res, err.code, safeMessage, STATUS_MAP[err.code],
+        err.retryAfterMs ? { retryAfterMs: err.retryAfterMs } : null);
+    }
+    // For AI_REASONING_OVERFLOW, include attemptId when present so the frontend
+    // can route Try Again to reevaluateAnswer rather than creating a duplicate attempt.
+    if (err.code === "AI_REASONING_OVERFLOW" && err.attemptId) {
+      return sendError(res, err.code, safeMessage, STATUS_MAP[err.code], { attemptId: err.attemptId });
+    }
     return sendError(res, err.code, safeMessage, STATUS_MAP[err.code]);
   }
 
@@ -290,6 +325,7 @@ module.exports = {
   getCurrentQuestion,
   submitAnswer,
   getAnswerStatus,
+  reevaluateAnswer,
   retryQuestion,
   getNextAction,
   requestExplanation,

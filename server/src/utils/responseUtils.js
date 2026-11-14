@@ -24,9 +24,11 @@ function sendSuccess(res, data, statusCode = 200) {
  * @param {string} code     - Machine-readable error code (e.g. "INVALID_FILE_TYPE")
  * @param {string} message  - Human-readable message safe to show the client
  * @param {number} statusCode - HTTP status (default 400)
+ * @param {object} [extra]   - Optional additional fields merged into the error object
  */
-function sendError(res, code, message, statusCode = 400) {
-  return res.status(statusCode).json({ success: false, error: { code, message } });
+function sendError(res, code, message, statusCode = 400, extra = null) {
+  const error = { code, message, ...(extra || {}) };
+  return res.status(statusCode).json({ success: false, error });
 }
 
 module.exports = { sendSuccess, sendError };

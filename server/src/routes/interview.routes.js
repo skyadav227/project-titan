@@ -21,6 +21,7 @@ const {
   getCurrentQuestion,
   submitAnswer,
   getAnswerStatus,
+  reevaluateAnswer,
   retryQuestion,
   getNextAction,
   requestExplanation,
@@ -53,6 +54,7 @@ router.post  ("/:id/end",          endInterview);
 // uploadAudio middleware runs BEFORE the controller — validates + stores the file
 router.post  ("/:id/questions/:questionId/answers", uploadAudio, submitAnswer);
 router.get   ("/:id/answers/:answerAttemptId",       getAnswerStatus);
+router.post  ("/:id/answers/:answerAttemptId/reevaluate", reevaluateAnswer);
 router.post  ("/:id/questions/:questionId/retry",    retryQuestion);
 
 // ── Explanation routes ─────────────────────────────────────────────────────────

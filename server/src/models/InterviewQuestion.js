@@ -139,6 +139,16 @@ const interviewQuestionSchema = new mongoose.Schema(
       default: null,
     },
 
+    // Populated when the most recent submission attempt is in a failed/retryable
+    // state (evaluation failure, AI error). Cleared on successful reevaluation or
+    // when the user requests a fresh answer via retryQuestion().
+    // NEVER overwritten by latestAttemptId — the two fields track different things.
+    pendingFailedAttemptId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AnswerAttempt",
+      default: null,
+    },
+
     // Max retries allowed for this question (pulled from session config at creation time)
     maxRetries: {
       type: Number,

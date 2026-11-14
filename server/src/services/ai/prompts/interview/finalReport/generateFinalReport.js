@@ -124,9 +124,14 @@ function parseFinalReportResponse(raw) {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    const err = new Error("AI returned invalid JSON for final report.");
-    err.code = "AI_INVALID_JSON";
-    throw err;
+    // Attempt to recover from truncated output (free model token-limit truncation)
+    parsed = _tryRepairTruncatedJsonReport(cleaned);
+    if (!parsed) {
+      const err = new Error("AI returned invalid JSON for final report.");
+      err.code = "AI_INVALID_JSON";
+      throw err;
+    }
+    console.warn("[parseFinalReportResponse] Recovered from truncated JSON — missing fields will be empty.");
   }
 
   // Ensure arrays exist
@@ -139,7 +144,49 @@ function parseFinalReportResponse(raw) {
     if (typeof parsed[f] !== "string") parsed[f] = "";
   }
 
+  // ── Minimum completeness check ────────────────────────────────────────────
+  // The final report is purely qualitative — all numeric scores come from
+  // pre-aggregated data. An all-empty report (every array empty, every string
+  // blank) is useless. Require at least one substantive qualitative field:
+  //   • a non-empty strengths or improvements entry
+  //   • a non-empty technicalSummary or communicationSummary
+  //
+  // A response that fails this was truncated before any content was emitted.
+  // Throw AI_SCHEMA_MISMATCH to allow the bounded retry to run.
+  const hasQualitativeContent = (
+    parsed.strengths.length     > 0 ||
+    parsed.improvements.length  > 0 ||
+    (typeof parsed.technicalSummary     === "string" && parsed.technicalSummary.trim().length     > 0) ||
+    (typeof parsed.communicationSummary === "string" && parsed.communicationSummary.trim().length > 0)
+  );
+
+  if (!hasQualitativeContent) {
+    const err = new Error("AI final report is incomplete: no qualitative content was returned. Retrying may produce a complete response.");
+    err.code = "AI_SCHEMA_MISMATCH";
+    throw err;
+  }
+
   return parsed;
+}
+
+/**
+ * Attempt to repair a truncated JSON string — same logic as in evaluateAnswer.js.
+ * Scans backwards for the last valid JSON object boundary.
+ *
+ * @param {string} s
+ * @returns {object|null}
+ */
+function _tryRepairTruncatedJsonReport(s) {
+  if (!s || typeof s !== "string") return null;
+  let pos = s.lastIndexOf("}");
+  while (pos > 0) {
+    try {
+      const obj = JSON.parse(s.slice(0, pos + 1));
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) return obj;
+    } catch { /* keep scanning */ }
+    pos = s.lastIndexOf("}", pos - 1);
+  }
+  return null;
 }
 
 module.exports = { buildFinalReportPrompt, parseFinalReportResponse };
