@@ -110,6 +110,15 @@ function reducer(state, action) {
   }
 }
 
+// Speech transcription failures have no usable transcript — reevaluateFailedAttempt
+// requires a saved transcript, so these errors must not set pendingAttemptId.
+// "Try Again" for these codes calls clearError() which returns to "asking".
+const FRESH_RECORDING_ERRORS = new Set([
+  "SPEECH_EMPTY_TRANSCRIPT",
+  "SPEECH_MALFORMED_RESPONSE",
+  "TRANSCRIPTION_FAILED",
+]);
+
 export function InterviewProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
   const pollRef = useRef(null);
@@ -270,9 +279,11 @@ export function InterviewProvider({ children }) {
       // error state, hiding the failure from the user. The ErrorState component
       // shows a "Try Again" button that calls clearError(), which returns to
       // "asking" correctly (Phase 2 fix in clearError).
-      // If the error includes an attemptId (EVALUATION_FAILED), store it so
-      // "Try Again" can route to reevaluateAnswer instead of resubmitting.
-      if (err?.attemptId) {
+      // Speech transcription failures (no usable transcript) must NOT route to
+      // reevaluateFailedAttempt — the reevaluation path requires a saved transcript.
+      // For these errors, pendingAttemptId remains null so "Try Again" calls
+      // clearError() which returns to "asking" for a fresh recording.
+      if (err?.attemptId && !FRESH_RECORDING_ERRORS.has(err.code)) {
         dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: err.attemptId });
       }
     }
@@ -310,9 +321,11 @@ export function InterviewProvider({ children }) {
       dispatch({ type: "SET_LOADING", payload: false });
       // Same as submitVoiceAnswer: SET_ERROR already sets uiState → "error".
       // Removing the SET_STATE("asking") override so the error is visible.
-      // If the error includes an attemptId (EVALUATION_FAILED), store it so
-      // "Try Again" can route to reevaluateAnswer instead of resubmitting.
-      if (err?.attemptId) {
+      // Speech transcription failures (no usable transcript) must NOT route to
+      // reevaluateFailedAttempt — the reevaluation path requires a saved transcript.
+      // For these errors, pendingAttemptId remains null so "Try Again" calls
+      // clearError() which returns to "asking" for a fresh recording.
+      if (err?.attemptId && !FRESH_RECORDING_ERRORS.has(err.code)) {
         dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: err.attemptId });
       }
     }
