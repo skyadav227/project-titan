@@ -52,6 +52,8 @@ import {
   endInterview,
   generateReport,
   getReport,
+  getCheckpointState,
+  skipQuestion,
 } from "../services/interviewService";
 
 // ── Polling interval for answer processing status ─────────────────────────────
@@ -76,6 +78,7 @@ const INITIAL_STATE = {
   reportSessionId:  null,     // set when report_ready — the session ID to navigate to
   pendingAttemptId: null,     // set when a submission failed AI evaluation — routes "Try Again" to reevaluate
   failedAttemptTranscript: null,  // transcript text from a failed evaluation attempt
+  checkpointState: null,      // { unresolvedQuestions, resolved? } from checkpoint endpoint
 };
 
 function reducer(state, action) {
@@ -106,6 +109,8 @@ function reducer(state, action) {
       return { ...state, pendingAttemptId: action.payload };
     case "SET_FAILED_TRANSCRIPT":
       return { ...state, failedAttemptTranscript: action.payload };
+    case "SET_CHECKPOINT_STATE":
+      return { ...state, checkpointState: action.payload };
     case "RESET":
       return { ...INITIAL_STATE };
     default:
@@ -172,6 +177,16 @@ export function InterviewProvider({ children }) {
         // Also store reportSessionId so InterviewPage's guard has it
         dispatch({ type: "SET_REPORT_SESSION_ID", payload: sessionId });
         dispatch({ type: "SET_STATE", payload: "report_ready" });
+        return;
+      }
+
+      if (session.status === "completing") {
+        const cpState = await getCheckpointState(sessionId).catch(() => null);
+        if (isCancelled()) return;
+        if (cpState) {
+          dispatch({ type: "SET_CHECKPOINT_STATE", payload: cpState });
+        }
+        dispatch({ type: "SET_STATE", payload: "checkpoint" });
         return;
       }
 
@@ -396,6 +411,9 @@ export function InterviewProvider({ children }) {
       if (result.action === "complete") {
         dispatch({ type: "SET_STATE", payload: "completing" });
         await triggerReportGeneration(session.id);
+      } else if (result.action === "checkpoint") {
+        dispatch({ type: "SET_CHECKPOINT_STATE", payload: { unresolvedQuestions: result.unresolvedQuestions } });
+        dispatch({ type: "SET_STATE", payload: "checkpoint" });
       } else if (result.action === "question") {
         dispatch({ type: "SET_QUESTION", payload: result.question });
         dispatch({ type: "SET_STATE", payload: "asking" });
@@ -476,6 +494,68 @@ export function InterviewProvider({ children }) {
         // Still retryable — update with the attempt ID from the error (may be same)
         dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: err.attemptId });
       }
+    }
+  }, [state]);
+
+  // ── Skip question at checkpoint ───────────────────────────────────────────
+  const skipQuestionAction = useCallback(async (questionId) => {
+    const { session } = state;
+    if (!session?.id) return;
+
+    try {
+      await skipQuestion(session.id, questionId);
+      // Re-fetch checkpoint state
+      const cpState = await getCheckpointState(session.id);
+      dispatch({ type: "SET_CHECKPOINT_STATE", payload: cpState });
+      if (cpState.resolved) {
+        dispatch({ type: "SET_STATE", payload: "completing" });
+        await triggerReportGeneration(session.id);
+      }
+    } catch (err) {
+      dispatch({ type: "SET_ERROR", payload: err });
+    }
+  }, [state]);
+
+  // ── Reevaluate at checkpoint ──────────────────────────────────────────────
+  const reevaluateAtCheckpoint = useCallback(async (attemptId) => {
+    const { session } = state;
+    if (!session?.id || !attemptId) return;
+
+    try {
+      // isCheckpoint=true is signalled via a request header or body parameter.
+      // The existing reevaluateAnswer endpoint is called; the service uses
+      // CHECKPOINT_REEVAL_LIMIT when invoked from the checkpoint flow.
+      // We pass a flag via a custom header so we don't change the URL contract.
+      await reevaluateAnswer(session.id, attemptId, { isCheckpoint: true });
+      const cpState = await getCheckpointState(session.id);
+      dispatch({ type: "SET_CHECKPOINT_STATE", payload: cpState });
+      if (cpState.resolved) {
+        dispatch({ type: "SET_STATE", payload: "completing" });
+        await triggerReportGeneration(session.id);
+      }
+    } catch (err) {
+      // Re-fetch checkpoint state to reflect current retries remaining even on error
+      const cpState = await getCheckpointState(session.id).catch(() => null);
+      if (cpState) dispatch({ type: "SET_CHECKPOINT_STATE", payload: cpState });
+      dispatch({ type: "SET_ERROR", payload: err });
+    }
+  }, [state]);
+
+  // ── Re-answer at checkpoint (transcription-problem path) ─────────────────
+  const reAnswerAtCheckpoint = useCallback(async (questionId) => {
+    const { session } = state;
+    if (!session?.id || !questionId) return;
+
+    try {
+      // retryQuestion resets the question to 'asked' and allows fresh recording
+      const result = await retryQuestion(session.id, questionId);
+      dispatch({ type: "SET_QUESTION", payload: result.question });
+      dispatch({ type: "SET_STATE", payload: "asking" });
+      // After submission completes (via continueToNext), if backend returns
+      // action:'checkpoint' again, the existing continueToNext handler will
+      // re-enter the checkpoint state.
+    } catch (err) {
+      dispatch({ type: "SET_ERROR", payload: err });
     }
   }, [state]);
 
@@ -634,7 +714,7 @@ export function InterviewProvider({ children }) {
   // navigating away would silently orphan the backend session.
   const ONGOING_STATES = new Set([
     "starting", "asking", "listening", "processing",
-    "showing_report", "retrying", "explaining", "completing",
+    "showing_report", "retrying", "explaining", "completing", "checkpoint",
   ]);
   const isInterviewOngoing = ONGOING_STATES.has(state.uiState);
 
@@ -655,6 +735,10 @@ export function InterviewProvider({ children }) {
     finishInterview,
     clearError,
     resetInterview,
+    // Checkpoint actions
+    skipQuestionAction,
+    reevaluateAtCheckpoint,
+    reAnswerAtCheckpoint,
   };
 
   return (

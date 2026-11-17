@@ -134,10 +134,15 @@ export function getAnswerStatus(sessionId, answerAttemptId) {
  * Re-runs AI evaluation on the existing failed attempt without creating
  * a new AnswerAttempt document. Does not consume the user's deliberate
  * answer-retry quota.
+ *
+ * options.isCheckpoint — when true, signals checkpoint-flow reevaluation
+ * so the backend applies CHECKPOINT_REEVAL_LIMIT instead of normal retry limits.
  */
-export function reevaluateAnswer(sessionId, attemptId) {
+export function reevaluateAnswer(sessionId, attemptId, options = {}) {
+  const body = options.isCheckpoint ? JSON.stringify({ isCheckpoint: true }) : undefined;
   return apiFetch(`/interviews/${sessionId}/answers/${attemptId}/reevaluate`, {
     method: "POST",
+    ...(body ? { body, headers: { "Content-Type": "application/json" } } : {}),
   });
 }
 
@@ -211,4 +216,24 @@ export function getInterviewHistory({ page = 1, limit = 20, status, interviewTyp
  */
 export function getInterviewProgress() {
   return apiFetch("/interviews/progress");
+}
+
+// ── Checkpoint operations ─────────────────────────────────────────────────────
+
+/**
+ * Get the checkpoint state — all unresolved questions.
+ * GET /api/interviews/:id/checkpoint
+ */
+export function getCheckpointState(sessionId) {
+  return apiFetch(`/interviews/${sessionId}/checkpoint`);
+}
+
+/**
+ * Permanently skip a question at the checkpoint.
+ * POST /api/interviews/:id/questions/:questionId/skip
+ */
+export function skipQuestion(sessionId, questionId) {
+  return apiFetch(`/interviews/${sessionId}/questions/${questionId}/skip`, {
+    method: "POST",
+  });
 }

@@ -15,6 +15,7 @@
  *   showing_report → per-question feedback
  *   explaining     → explanation panel
  *   completing     → generating report
+ *   checkpoint     → final evaluation checkpoint (all unresolved questions)
  *   error          → recoverable error state
  *
  * This component does NOT contain business logic — it delegates everything
@@ -24,9 +25,10 @@ import { useCallback, useRef, useState, useEffect } from "react";
 import { useInterview } from "../../contexts/InterviewContext";
 import VoiceRecorder    from "./VoiceRecorder";
 import AnswerReport     from "./AnswerReport";
-import ExplanationPanel from "./ExplanationPanel";
-import DashboardCard    from "../dashboard/ui/DashboardCard";
-import Button           from "../ui/Button";
+import ExplanationPanel  from "./ExplanationPanel";
+import CheckpointScreen  from "./CheckpointScreen";
+import DashboardCard     from "../dashboard/ui/DashboardCard";
+import Button            from "../ui/Button";
 
 // ── Idempotency key per answer (prevents duplicate submissions) ───────────────
 function useIdempotencyKey() {
@@ -419,6 +421,15 @@ export default function InterviewSession() {
           isReevaluating={isLoading}
           submittedAnswer={failedAttemptTranscript}
         />
+      </div>
+    );
+  }
+
+  // ── Checkpoint ────────────────────────────────────────────────────────────
+  if (uiState === "checkpoint") {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <CheckpointScreen />
       </div>
     );
   }
