@@ -13,6 +13,11 @@
 "use strict";
 
 const interviewService = require("../services/interviewService");
+// Destructured for the two checkpoint additions (called via interviewService.X below)
+const {
+  getCheckpointState: _getCheckpointStateSvc,
+  skipQuestion:       _skipQuestionSvc,
+} = require("../services/interviewService");
 const {
   validateCreateInterview,
   validateExplanationRequest,
@@ -60,6 +65,30 @@ async function getCurrentQuestion(req, res, next) {
   try {
     const question = await interviewService.getCurrentQuestion(req.params.id, req.user.id);
     return sendSuccess(res, { question });
+  } catch (err) {
+    return _handleDomainError(err, res, next);
+  }
+}
+
+// ── GET /api/interviews/:id/checkpoint ────────────────────────────────────────
+async function getCheckpointState(req, res, next) {
+  try {
+    const result = await interviewService.getCheckpointState(req.params.id, req.user.id);
+    return sendSuccess(res, result);
+  } catch (err) {
+    return _handleDomainError(err, res, next);
+  }
+}
+
+// ── POST /api/interviews/:id/questions/:questionId/skip ───────────────────────
+async function skipQuestion(req, res, next) {
+  try {
+    const result = await interviewService.skipQuestion(
+      req.params.id,
+      req.params.questionId,
+      req.user.id
+    );
+    return sendSuccess(res, result);
   } catch (err) {
     return _handleDomainError(err, res, next);
   }
@@ -261,6 +290,8 @@ function _handleDomainError(err, res, next) {
     DUPLICATE_ANSWER:           409,
     ANSWER_PROCESSING:          409,
     RETRY_LIMIT_REACHED:        409,
+    INTERVIEW_NOT_RESOLVED:     409,
+    CHECKPOINT_EXHAUSTED:       422,
     EVALUATION_PENDING_REEVALUATION: 409,
     TRANSCRIPTION_FAILED:       502,
     EVALUATION_FAILED:          502,
@@ -327,6 +358,8 @@ module.exports = {
   getInterview,
   startInterview,
   getCurrentQuestion,
+  getCheckpointState,
+  skipQuestion,
   submitAnswer,
   getAnswerStatus,
   reevaluateAnswer,

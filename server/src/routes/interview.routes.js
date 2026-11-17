@@ -19,6 +19,8 @@ const {
   getInterview,
   startInterview,
   getCurrentQuestion,
+  getCheckpointState,
+  skipQuestion,
   submitAnswer,
   getAnswerStatus,
   reevaluateAnswer,
@@ -60,6 +62,10 @@ router.post  ("/:id/questions/:questionId/retry",    retryQuestion);
 // ── Explanation routes ─────────────────────────────────────────────────────────
 router.post  ("/:id/explanations/continue", continueAfterExplanation);
 router.post  ("/:id/explanations",          requestExplanation);
+
+// ── Checkpoint routes ──────────────────────────────────────────────────────────
+router.get ('/:id/checkpoint',                           getCheckpointState);
+router.post('/:id/questions/:questionId/skip',           skipQuestion);
 
 // ── Report routes ──────────────────────────────────────────────────────────────
 router.post  ("/:id/report", generateReport);
