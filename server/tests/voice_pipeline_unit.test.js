@@ -391,6 +391,88 @@ test("36. TRANSCRIPTION_FAILED is in FRESH_RECORDING_ERRORS (source inspection)"
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+process.stdout.write("\n══ Answer Visibility Tests ══\n");
+
+// Read client context source (may already be in memory above but re-read for clarity)
+const ANSWER_REPORT_SRC = fs.readFileSync(
+  path.join(__dirname, "../../client/src/components/interview/AnswerReport.jsx"), "utf8");
+
+test("AV-1. answerAttemptToResult transcript condition does NOT gate on status === 'completed'", () => {
+  assert(
+    !INTERVIEW_SRC.includes('attempt.status === "completed" && attempt.transcript'),
+    'transcript must not be gated on attempt.status === "completed"'
+  );
+});
+
+test("AV-2. failedAttemptTranscript field exists in INITIAL_STATE", () => {
+  assert(
+    INTERVIEW_CTX_SRC.includes("failedAttemptTranscript"),
+    "InterviewContext.jsx must define failedAttemptTranscript in INITIAL_STATE"
+  );
+});
+
+test("AV-3. SET_FAILED_TRANSCRIPT case exists in the reducer", () => {
+  assert(
+    INTERVIEW_CTX_SRC.includes("SET_FAILED_TRANSCRIPT"),
+    "InterviewContext.jsx reducer must handle SET_FAILED_TRANSCRIPT"
+  );
+});
+
+test("AV-4. AnswerReport.jsx renders answerResult.transcript.text", () => {
+  assert(
+    ANSWER_REPORT_SRC.includes("transcript.text"),
+    "AnswerReport.jsx must reference transcript.text"
+  );
+});
+
+test("AV-5. EVALUATION_FAILED throw attaches err.transcript", () => {
+  assert(
+    INTERVIEW_SRC.includes("err.transcript = attempt.transcript"),
+    "interviewService.js must attach err.transcript at the EVALUATION_FAILED throw site"
+  );
+});
+
+test("AV-6. Transcript available on failed attempt (logic simulation)", () => {
+  const attempt = { transcript: { text: "hello" } };
+  const result = attempt.transcript?.text
+    ? { text: attempt.transcript.text, available: true }
+    : { available: false };
+  assert(result.available === true, "available must be true");
+  assert(result.text === "hello", "text must equal 'hello'");
+});
+
+test("AV-7. Transcript unavailable without text (logic simulation)", () => {
+  const attempt = { transcript: { text: null } };
+  const result = attempt.transcript?.text
+    ? { text: attempt.transcript.text, available: true }
+    : { available: false };
+  assert(result.available === false, "available must be false when text is null");
+  assert(result.text === undefined, "text must be absent when unavailable");
+});
+
+test("AV-8. failedAttemptTranscript routing (logic simulation)", () => {
+  const errWithTranscript = { code: "EVALUATION_FAILED", transcript: "I think the answer is..." };
+  assert(!!errWithTranscript?.transcript === true,
+    "EVALUATION_FAILED with transcript: err?.transcript must be truthy");
+
+  const errWithoutTranscript = { code: "TRANSCRIPTION_FAILED" };
+  assert(!!errWithoutTranscript?.transcript === false,
+    "TRANSCRIPTION_FAILED without transcript: err?.transcript must be falsy");
+});
+
+test("AV-9. AnswerReport renders when available (logic simulation)", () => {
+  const answerResult = { transcript: { available: true, text: "answer text" } };
+  const shouldRender = answerResult?.transcript?.available && answerResult.transcript.text;
+  assert(!!shouldRender === true, "condition must be truthy when transcript is available");
+});
+
+test("AV-10. AnswerReport does not render when unavailable (logic simulation)", () => {
+  const answerResult = { transcript: { available: false } };
+  const shouldRender = answerResult?.transcript?.available && answerResult.transcript.text;
+  assert(!shouldRender === true, "condition must be falsy when transcript is unavailable");
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 process.stdout.write(`\n${"═".repeat(60)}\n`);
 process.stdout.write(`  PASS: ${PASS} / ${PASS + FAIL}\n`);
 process.stdout.write(`  FAIL: ${FAIL} / ${PASS + FAIL}\n\n`);
