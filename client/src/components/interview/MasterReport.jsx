@@ -150,6 +150,14 @@ export default function MasterReport() {
               </div>
             )}
           </div>
+          {report.evaluationCoverage && (
+            <p className="text-xs text-white/35 mt-3 pt-3 border-t border-white/[0.06]">
+              {report.evaluationCoverage.evaluated} of {report.evaluationCoverage.total} questions evaluated
+              {report.evaluationCoverage.skipped > 0 && (
+                <span className="ml-1">· {report.evaluationCoverage.skipped} skipped</span>
+              )}
+            </p>
+          )}
         </DashboardCard>
       )}
 
@@ -254,6 +262,24 @@ export default function MasterReport() {
                       <span className="text-xs text-green-400/60">↑ improved</span>
                     )}
                   </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </DashboardCard>
+      )}
+
+      {/* ── Skipped Questions ───────────────────────────────── */}
+      {report.skippedQuestions?.length > 0 && (
+        <DashboardCard>
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/30 mb-3">Skipped Questions</p>
+          <div className="space-y-2">
+            {report.skippedQuestions.map((q, i) => (
+              <div key={q.questionId?.toString() || i} className="flex items-start gap-2.5">
+                <span className="text-white/20 flex-shrink-0 mt-0.5" aria-hidden="true">—</span>
+                <div>
+                  <p className="text-sm text-white/55">{q.questionText}</p>
+                  <p className="text-xs text-white/30 mt-0.5">This question was skipped and not scored.</p>
                 </div>
               </div>
             ))}
