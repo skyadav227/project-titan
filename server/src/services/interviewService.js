@@ -438,7 +438,7 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
     throw err;
   }
 
-  if (session.status !== "active" && session.status !== "paused") {
+  if (session.status !== "active" && session.status !== "paused" && session.status !== "completing") {
     const err = new Error(`Interview is not active (status: ${session.status}).`);
     err.code = "INTERVIEW_NOT_ACTIVE"; err.status = 409;
     throw err;
@@ -876,7 +876,7 @@ async function getAnswerStatus(sessionId, answerAttemptId, userId) {
  * @param {string} userId
  * @returns {Promise<object>} Answer attempt result (same shape as submitAnswer)
  */
-async function reevaluateAnswer(sessionId, attemptId, userId) {
+async function reevaluateAnswer(sessionId, attemptId, userId, { isCheckpoint = false } = {}) {
   assertValidObjectId(sessionId, "Interview session");
   assertValidObjectId(attemptId,  "Answer attempt");
 
@@ -884,8 +884,9 @@ async function reevaluateAnswer(sessionId, attemptId, userId) {
   // findOneAndUpdate with { "processing.operation": null } in the filter is
   // atomic at the document level — MongoDB guarantees exactly one of two
   // concurrent requests gets the lock; the other gets null and a 409.
+  // Accepts status: "active", "paused", or "completing" (checkpoint state).
   const session = await InterviewSession.findOneAndUpdate(
-    { _id: sessionId, userId, status: "active", "processing.operation": null },
+    { _id: sessionId, userId, status: { $in: ["active", "paused", "completing"] }, "processing.operation": null },
     {
       $set: {
         "processing.operation":          "processing_answer",
@@ -905,7 +906,7 @@ async function reevaluateAnswer(sessionId, attemptId, userId) {
       err.code = "INTERVIEW_NOT_FOUND"; err.status = 404;
       throw err;
     }
-    if (existing.status !== "active") {
+    if (!["active", "paused", "completing"].includes(existing.status)) {
       // Abandoned/completed/failed sessions cannot be reevaluated.
       const err = new Error(`Interview is not active (status: ${existing.status}).`);
       err.code = "INTERVIEW_NOT_ACTIVE"; err.status = 409;
@@ -920,8 +921,8 @@ async function reevaluateAnswer(sessionId, attemptId, userId) {
   // Filter on status:"failed" + retryable:true + attempts < AI_MAX_RETRIES so
   // a concurrent reevaluate call on the same attempt gets null (already claimed)
   // or gets rejected (exhausted retries). $inc processing.attempts is atomic.
-  const { AI_MAX_RETRIES } = require("../config/env");
-  const maxReeval = AI_MAX_RETRIES; // reuse existing env-configured bound
+  const { AI_MAX_RETRIES, CHECKPOINT_REEVAL_LIMIT } = require("../config/env");
+  const maxReeval = isCheckpoint ? CHECKPOINT_REEVAL_LIMIT : AI_MAX_RETRIES;
 
   const attempt = await AnswerAttempt.findOneAndUpdate(
     {
@@ -962,6 +963,12 @@ async function reevaluateAnswer(sessionId, attemptId, userId) {
       throw err;
     }
     if (existingAttempt.processing?.attempts >= maxReeval) {
+      // Clear the question lock so the checkpoint can surface this question cleanly.
+      // The failed attempt stays in DB — only the lock is released.
+      await InterviewQuestion.updateOne(
+        { _id: existingAttempt.questionId },
+        { $unset: { pendingFailedAttemptId: 1 } }
+      ).catch(() => {});
       const err = new Error("Maximum reevaluation attempts reached. Please submit a new answer.");
       err.code = "RETRY_LIMIT_REACHED"; err.status = 409;
       throw err;
@@ -1147,6 +1154,129 @@ async function reevaluateAnswer(sessionId, attemptId, userId) {
   }
 }
 
+// ── Phase 5c: Checkpoint State ────────────────────────────────────────────────
+
+/**
+ * Return all unresolved questions for the final evaluation checkpoint.
+ * A question is "unresolved" when it was asked but is not yet answered or skipped.
+ *
+ * @param {string} sessionId
+ * @param {string} userId
+ * @returns {Promise<{ resolved: boolean, unresolvedQuestions: Array }>}
+ */
+async function getCheckpointState(sessionId, userId) {
+  assertValidObjectId(sessionId, "Interview session");
+  const session = await InterviewSession.findOne({ _id: sessionId, userId });
+  if (!session) {
+    const err = new Error("Interview session not found.");
+    err.code = "INTERVIEW_NOT_FOUND"; err.status = 404;
+    throw err;
+  }
+
+  const { CHECKPOINT_REEVAL_LIMIT } = require("../config/env");
+  // Fetch all asked questions that are not yet resolved
+  const unresolvedDocs = await InterviewQuestion.find({
+    sessionId: session._id,
+    userId,
+    status: { $nin: ["answered", "skipped"] },
+    askedAt: { $ne: null },
+  }).lean();
+
+  const unresolvedQuestions = [];
+  for (const q of unresolvedDocs) {
+    let attemptId = null, errorCode = null, hasTranscript = false,
+        transcriptText = null, retriesUsed = 0;
+
+    if (q.pendingFailedAttemptId) {
+      const attempt = await AnswerAttempt.findOne(
+        { _id: q.pendingFailedAttemptId, sessionId: session._id, userId },
+        { "transcript.text": 1, "processing.attempts": 1,
+          "processing.errorCode": 1, status: 1 }
+      ).lean();
+      if (attempt) {
+        attemptId     = attempt._id;
+        errorCode     = attempt.processing?.errorCode || null;
+        hasTranscript = !!(attempt.transcript?.text?.trim());
+        transcriptText = attempt.transcript?.text || null;
+        retriesUsed   = attempt.processing?.attempts || 0;
+      }
+    }
+
+    const retriesRemaining = Math.max(0, CHECKPOINT_REEVAL_LIMIT - retriesUsed);
+    unresolvedQuestions.push({
+      id:               q._id,
+      text:             q.text,
+      attemptId,
+      errorCode,
+      hasTranscript,
+      transcriptText,
+      retriesUsed,
+      retriesRemaining,
+      canReevaluate:    hasTranscript && retriesRemaining > 0,
+      canReAnswer:      !hasTranscript,
+    });
+  }
+
+  const resolved = unresolvedQuestions.length === 0;
+  return { resolved, unresolvedQuestions };
+}
+
+// ── Phase 5d: Skip Question ───────────────────────────────────────────────────
+
+/**
+ * Permanently skip an unresolved question at the checkpoint.
+ * Atomic — cannot race with reevaluation or answer submission.
+ * The original attempt and transcript are preserved; only the question status changes.
+ *
+ * @param {string} sessionId
+ * @param {string} questionId
+ * @param {string} userId
+ * @returns {Promise<{ questionId: ObjectId, status: string }>}
+ */
+async function skipQuestion(sessionId, questionId, userId) {
+  assertValidObjectId(sessionId,  "Interview session");
+  assertValidObjectId(questionId, "Question");
+
+  const session = await InterviewSession.findOne({ _id: sessionId, userId });
+  if (!session) {
+    const err = new Error("Interview session not found.");
+    err.code = "INTERVIEW_NOT_FOUND"; err.status = 404;
+    throw err;
+  }
+  if (!["completing", "active"].includes(session.status)) {
+    const err = new Error(`Interview is not in a skippable state (status: ${session.status}).`);
+    err.code = "INTERVIEW_NOT_ACTIVE"; err.status = 409;
+    throw err;
+  }
+
+  // Atomic: only transitions from 'asked' — prevents race with reevaluation
+  const question = await InterviewQuestion.findOneAndUpdate(
+    { _id: questionId, sessionId: session._id, userId, status: "asked" },
+    { $set: { status: "skipped", completedAt: new Date() },
+      $unset: { pendingFailedAttemptId: 1 } },
+    { new: true }
+  );
+  if (!question) {
+    // Either not found, or already answered/skipped — check which
+    const existing = await InterviewQuestion.findOne({
+      _id: questionId, sessionId: session._id, userId,
+    });
+    if (!existing) {
+      const err = new Error("Question not found."); err.code = "QUESTION_NOT_FOUND"; err.status = 404; throw err;
+    }
+    const err = new Error("This question cannot be skipped (already resolved).");
+    err.code = "QUESTION_ALREADY_ANSWERED"; err.status = 409; throw err;
+  }
+
+  // Increment questionsCompleted so getNextAction bookkeeping stays accurate
+  await InterviewSession.updateOne(
+    { _id: session._id },
+    { $inc: { "progress.questionsCompleted": 1 }, $set: { lastActivityAt: new Date() } }
+  );
+
+  return { questionId: question._id, status: "skipped" };
+}
+
 // ── Phase 6: Generate Next Action ─────────────────────────────────────────────
 
 /**
@@ -1177,6 +1307,16 @@ async function getNextAction(sessionId, userId) {
   const questionLimit      = session.configuration?.questionLimit  || 10;
 
   if (questionsCompleted >= questionLimit) {
+    // Check for unresolved questions before declaring completion
+    const checkpointData = await getCheckpointState(sessionId, userId);
+    if (!checkpointData.resolved) {
+      // Transition session to 'completing' (checkpoint state)
+      await InterviewSession.updateOne(
+        { _id: session._id, status: "active" },
+        { $set: { status: "completing", lastActivityAt: new Date() } }
+      );
+      return { action: "checkpoint", unresolvedQuestions: checkpointData.unresolvedQuestions };
+    }
     return { action: "complete" };
   }
 
@@ -1335,7 +1475,7 @@ async function retryQuestion(sessionId, questionId, userId) {
   assertValidObjectId(sessionId, "Interview session");
   assertValidObjectId(questionId, "Question");
   const session = await InterviewSession.findOne({ _id: sessionId, userId });
-  if (!session || session.status !== "active") {
+  if (!session || (!["active", "completing"].includes(session.status))) {
     const err = new Error("Interview session not found or not active.");
     err.code = "INTERVIEW_NOT_ACTIVE"; err.status = 409;
     throw err;
@@ -1515,16 +1655,30 @@ async function generateReport(sessionId, userId) {
   }
 
   // Only allow report generation for sessions that have meaningful answer data.
-  // "completed" → normal path after all questions answered.
-  // "active"    → early exit / force-complete path (answers exist, session ongoing).
-  // "abandoned" → user explicitly left — no report should be generated (they
+  // "completed"  → normal path after all questions answered.
+  // "active"     → early exit / force-complete path (answers exist, session ongoing).
+  // "completing" → checkpoint in progress — allowed so the report step can finalize.
+  // "abandoned"  → user explicitly left — no report should be generated (they
   //               chose to end without a report; generating one here would
   //               contradict that intent and potentially produce misleading data).
-  // "failed"    → session errored — answers may be partial/corrupt; no report.
-  if (!["completed", "active"].includes(session.status)) {
+  // "failed"     → session errored — answers may be partial/corrupt; no report.
+  if (!["completed", "active", "completing"].includes(session.status)) {
     const err = new Error("A report can only be generated for a completed interview session.");
     err.code = "INTERVIEW_NOT_ACTIVE"; err.status = 409;
     throw err;
+  }
+
+  // Pre-flight: reject if any asked questions remain unresolved
+  if (session.status !== "completed") {
+    const unresolvedCount = await InterviewQuestion.countDocuments({
+      sessionId: session._id,
+      status: { $nin: ["answered", "skipped"] },
+      askedAt: { $ne: null },
+    });
+    if (unresolvedCount > 0) {
+      const err = new Error("All questions must be resolved (answered or skipped) before generating the report.");
+      err.code = "INTERVIEW_NOT_RESOLVED"; err.status = 409; throw err;
+    }
   }
 
   // If report already exists and is ready, return it
@@ -1540,15 +1694,19 @@ async function generateReport(sessionId, userId) {
   try {
     // Aggregate all completed questions and their best attempts
     const questions = await InterviewQuestion.find(
-      { sessionId: session._id, userId, status: "answered" },
+      { sessionId: session._id, userId, status: { $in: ["answered", "skipped"] } },
     ).sort({ sequenceIndex: 1 });
+
+    // Separate answered from skipped — skipped are excluded from scoring
+    const answeredQuestions = questions.filter(q => q.status === "answered");
+    const skippedQuestionsData = questions.filter(q => q.status === "skipped");
 
     const attemptSummaries = [];
     const allScores = { overallScore: [], technicalAccuracy: [], communication: [], clarity: [], structure: [], relevance: [], problemSolving: [] };
     const speechTotals = { totalFillerWords: 0, totalDurationMs: 0, totalSpeakingRate: 0, countSpeaking: 0 };
     const retryImprovements = [];
 
-    for (const q of questions) {
+    for (const q of answeredQuestions) {
       const attempts = await AnswerAttempt.find(
         { questionId: q._id, status: "completed" },
         { analysis: 1, answerQuality: 1, attemptNumber: 1, improvement: 1 }
@@ -1609,7 +1767,7 @@ async function generateReport(sessionId, userId) {
     const avg = (arr) => arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
 
     const aggregatedScores = {
-      questionsAnswered: questions.length,
+      questionsAnswered: answeredQuestions.length,
       retryCount:        session.progress?.retryCount || 0,
       overallScore:      avg(allScores.overallScore) ?? 0,
       dimensions: {
@@ -1626,18 +1784,25 @@ async function generateReport(sessionId, userId) {
       averageSpeakingRate:       speechTotals.countSpeaking > 0 ? Math.round(speechTotals.totalSpeakingRate / speechTotals.countSpeaking) : null,
       totalFillerWords:          speechTotals.totalFillerWords || null,
       averageFillerRate:         null, // calculated from totals if needed
-      averageResponseDurationMs: questions.length > 0 ? Math.round(speechTotals.totalDurationMs / questions.length) : null,
+      averageResponseDurationMs: answeredQuestions.length > 0 ? Math.round(speechTotals.totalDurationMs / answeredQuestions.length) : null,
     };
 
     // AI synthesis (qualitative insights from the evidence)
     const aiSynthesis = await aiService.generateFinalReport({
       session,
-      questions,
+      questions: answeredQuestions,
       attemptSummaries,
       aggregatedScores,
       speechSummary,
       retryImprovements,
     });
+
+    // Build skipped questions list for the report
+    const skippedQuestions = skippedQuestionsData.map(q => ({
+      questionId:   q._id,
+      questionText: q.text || "",
+      attemptId:    q.pendingFailedAttemptId || null,
+    }));
 
     // Build final report
     const finalReport = {
@@ -1661,6 +1826,12 @@ async function generateReport(sessionId, userId) {
         attempts:     s.attempts,
         improved:     s.improved,
       })),
+      skippedQuestions,
+      evaluationCoverage: {
+        total:     questions.length,
+        evaluated: answeredQuestions.length,
+        skipped:   skippedQuestions.length,
+      },
       status:      "ready",
       generatedAt: new Date(),
       aiMetadata: {
@@ -1674,7 +1845,7 @@ async function generateReport(sessionId, userId) {
 
     // Persist + complete session
     session.finalReport = finalReport;
-    session.status      = session.status === "active" ? "completed" : session.status;
+    session.status      = ["active", "completing"].includes(session.status) ? "completed" : session.status;
     session.completedAt = session.completedAt || new Date();
     session.lastActivityAt = new Date();
     await session.save();
@@ -1901,8 +2072,10 @@ function reportToDto(session) {
       questionsRetried:  r.statistics?.retryCount,
       improvedAttempts:  r.statistics?.improvedAttempts,
     },
-    questionBreakdown: r.questionBreakdown,
-    generatedAt:     r.generatedAt,
+    questionBreakdown:   r.questionBreakdown,
+    skippedQuestions:    r.skippedQuestions    || [],
+    evaluationCoverage:  r.evaluationCoverage  || null,
+    generatedAt:         r.generatedAt,
   };
 }
 
@@ -1914,6 +2087,8 @@ module.exports = {
   submitAnswer,
   getAnswerStatus,
   reevaluateAnswer,
+  getCheckpointState,
+  skipQuestion,
   getNextAction,
   retryQuestion,
   requestExplanation,

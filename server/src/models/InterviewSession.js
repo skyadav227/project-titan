@@ -175,6 +175,20 @@ const finalReportSchema = new mongoose.Schema(
 
     questionBreakdown: { type: [questionBreakdownEntrySchema], default: [] },
 
+    skippedQuestions: {
+      type: [{
+        questionId:   { type: mongoose.Schema.Types.ObjectId, ref: "InterviewQuestion" },
+        questionText: { type: String, default: "" },
+        attemptId:    { type: mongoose.Schema.Types.ObjectId, ref: "AnswerAttempt", default: null },
+      }],
+      default: [],
+    },
+    evaluationCoverage: {
+      total:     { type: Number, default: 0 },
+      evaluated: { type: Number, default: 0 },
+      skipped:   { type: Number, default: 0 },
+    },
+
     status: {
       type: String,
       enum: ["not_started", "generating", "ready", "failed"],

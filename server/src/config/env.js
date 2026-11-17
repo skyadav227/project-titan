@@ -58,6 +58,7 @@ module.exports = {
   // Interview configuration
   MAX_RETRIES_PER_QUESTION: parseInt(process.env.MAX_RETRIES_PER_QUESTION, 10) || 2,
   AI_MAX_RETRIES: parseInt(process.env.AI_MAX_RETRIES, 10) || 3,
+  CHECKPOINT_REEVAL_LIMIT: parseInt(process.env.CHECKPOINT_REEVAL_LIMIT, 10) || 2,
   AI_TIMEOUT_MS: parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000,
 
   // Derived
