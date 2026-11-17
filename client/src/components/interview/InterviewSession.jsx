@@ -164,7 +164,7 @@ function CompletingState() {
 }
 
 // ── Error state ───────────────────────────────────────────────────────────────
-function ErrorState({ error, onDismiss, hasPendingAttempt, onReevaluate, isReevaluating }) {
+function ErrorState({ error, onDismiss, hasPendingAttempt, onReevaluate, isReevaluating, submittedAnswer }) {
   const isRetryExhausted = error?.code === "RETRY_LIMIT_REACHED";
 
   return (
@@ -174,6 +174,14 @@ function ErrorState({ error, onDismiss, hasPendingAttempt, onReevaluate, isReeva
           <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
         </svg>
       </div>
+      {submittedAnswer && (
+        <div className="w-full max-w-sm mb-2 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 text-left">
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/25 mb-1">Your answer</p>
+          <p className="text-sm text-white/50 leading-relaxed whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+            {submittedAnswer}
+          </p>
+        </div>
+      )}
       <div>
         <p className="text-sm font-medium text-white/80">
           {error?.message || "Something went wrong."}
@@ -333,6 +341,7 @@ export default function InterviewSession() {
     error,
     isLoading,
     pendingAttemptId,
+    failedAttemptTranscript,
     submitVoiceAnswer,
     submitTextAnswerAction,
     continueToNext,
@@ -408,6 +417,7 @@ export default function InterviewSession() {
           hasPendingAttempt={!!pendingAttemptId}
           onReevaluate={reevaluateFailedAttempt}
           isReevaluating={isLoading}
+          submittedAnswer={failedAttemptTranscript}
         />
       </div>
     );

@@ -75,6 +75,7 @@ const INITIAL_STATE = {
   pollingAttemptId: null,     // answer attempt being polled
   reportSessionId:  null,     // set when report_ready — the session ID to navigate to
   pendingAttemptId: null,     // set when a submission failed AI evaluation — routes "Try Again" to reevaluate
+  failedAttemptTranscript: null,  // transcript text from a failed evaluation attempt
 };
 
 function reducer(state, action) {
@@ -103,6 +104,8 @@ function reducer(state, action) {
       return { ...state, reportSessionId: action.payload };
     case "SET_PENDING_ATTEMPT_ID":
       return { ...state, pendingAttemptId: action.payload };
+    case "SET_FAILED_TRANSCRIPT":
+      return { ...state, failedAttemptTranscript: action.payload };
     case "RESET":
       return { ...INITIAL_STATE };
     default:
@@ -286,6 +289,9 @@ export function InterviewProvider({ children }) {
       if (err?.attemptId && !FRESH_RECORDING_ERRORS.has(err.code)) {
         dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: err.attemptId });
       }
+      if (err?.transcript) {
+        dispatch({ type: "SET_FAILED_TRANSCRIPT", payload: err.transcript });
+      }
     }
   }, [state]);
 
@@ -327,6 +333,9 @@ export function InterviewProvider({ children }) {
       // clearError() which returns to "asking" for a fresh recording.
       if (err?.attemptId && !FRESH_RECORDING_ERRORS.has(err.code)) {
         dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: err.attemptId });
+      }
+      if (err?.transcript) {
+        dispatch({ type: "SET_FAILED_TRANSCRIPT", payload: err.transcript });
       }
     }
   }, [state]);
@@ -444,6 +453,7 @@ export function InterviewProvider({ children }) {
         dispatch({ type: "SET_ANSWER_RESULT", payload: result });
         dispatch({ type: "SET_STATE", payload: "showing_report" });
         dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: null });
+        dispatch({ type: "SET_FAILED_TRANSCRIPT", payload: null });
         dispatch({ type: "SET_LOADING", payload: false });
       } else {
         // Should not happen for synchronous V1 — but handle gracefully
@@ -607,6 +617,7 @@ export function InterviewProvider({ children }) {
       prevUiState = "setup";  // no active session — go back to setup
     }
     dispatch({ type: "SET_ERROR", payload: null });
+    dispatch({ type: "SET_FAILED_TRANSCRIPT", payload: null });
     dispatch({ type: "SET_STATE", payload: prevUiState });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.session, state.question]);
