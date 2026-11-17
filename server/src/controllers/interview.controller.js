@@ -280,6 +280,8 @@ function _handleDomainError(err, res, next) {
     SPEECH_CONFIG_ERROR:        500,
     SPEECH_NETWORK_ERROR:       502,
     SPEECH_PROVIDER_ERROR:      502,
+    SPEECH_MALFORMED_RESPONSE: 502,
+    SPEECH_EMPTY_TRANSCRIPT:   422,
     AUDIO_TOO_LARGE:            413,
     UNSUPPORTED_AUDIO_FORMAT:   415,
   };
@@ -299,7 +301,9 @@ function _handleDomainError(err, res, next) {
     // instead of creating a duplicate submission (which would hit E11000).
     if ((err.code === "EVALUATION_FAILED" || err.code === "TRANSCRIPTION_FAILED" ||
          err.code === "EVALUATION_PENDING_REEVALUATION") && err.attemptId) {
-      return sendError(res, err.code, safeMessage, STATUS_MAP[err.code], { attemptId: err.attemptId });
+      const extras = { attemptId: err.attemptId };
+      if (err.transcript != null) extras.transcript = err.transcript;
+      return sendError(res, err.code, safeMessage, STATUS_MAP[err.code], extras);
     }
     // For AI_RATE_LIMIT, include retryAfterMs so the frontend can display a countdown.
     if (err.code === "AI_RATE_LIMIT") {

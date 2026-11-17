@@ -611,11 +611,56 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
         err.code = "TRANSCRIPTION_FAILED"; err.status = 502;
         err.attemptId = attempt._id.toString();
         throw err;
+      } finally {
+        // Cleanup runs on both success and failure paths.
+        // deleteAudioAfterProcessing is already idempotent (deleteStoredFile checks
+        // fs.existsSync before unlinking and swallows ENOENT — confirmed in fileUtils.js).
+        try {
+          speechService.deleteAudioAfterProcessing(file.filename);
+          attempt.audio.deleted = true;
+        } catch (cleanupErr) {
+          console.error("[interviewService] Audio cleanup error (non-fatal):", cleanupErr.message);
+        }
       }
 
-      // Delete audio after transcription (V1 retention policy — no long-term raw audio)
-      speechService.deleteAudioAfterProcessing(file.filename);
-      attempt.audio.deleted = true;
+      // Validate STT result — only for audio path (hasAudio === true)
+      const malformed = !transcriptResult || typeof transcriptResult !== "object";
+      const empty     = !malformed && (!transcriptResult.text || !transcriptResult.text.trim());
+
+      if (malformed || empty) {
+        const code    = malformed ? "SPEECH_MALFORMED_RESPONSE" : "SPEECH_EMPTY_TRANSCRIPT";
+        const message = malformed
+          ? "Speech provider returned a malformed response."
+          : "No speech was detected in your recording. Please try again.";
+        const status  = malformed ? 502 : 422;
+
+        // Follow the same failure lifecycle as catch(sttErr) above.
+        // Note: pendingFailedAttemptId is set so the frontend's reevaluateFailedAttempt
+        // path is triggered on "Try Again". reevaluateAnswer will reject an attempt with
+        // an empty transcript (the INVALID_ANSWER guard already exists). That is
+        // intentional — the user will need to re-record.
+        attempt.status = "failed";
+        attempt.processing.errorCode    = code;
+        attempt.processing.errorMessage = message;
+        attempt.processing.retryable    = true;
+        await attempt.save();
+
+        session.processing.operation    = null;
+        session.processing.errorCode    = code;
+        session.processing.retryable    = true;
+        await session.save();
+
+        await InterviewQuestion.updateOne(
+          { _id: question._id },
+          { pendingFailedAttemptId: attempt._id }
+        ).catch(() => {});
+
+        const err = new Error(message);
+        err.code      = code;
+        err.status    = status;
+        err.attemptId = attempt._id.toString();
+        throw err;
+      }
     }
 
     // Store transcript (same structure regardless of input path)
@@ -690,6 +735,7 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
       // The frontend uses this to route Try Again to reevaluateAnswer instead of
       // creating a new submission — preventing the E11000 duplicate key error.
       err.attemptId = attempt._id.toString();
+      err.transcript = attempt.transcript?.text || null;
       throw err;
     }
 
@@ -1788,7 +1834,7 @@ function answerAttemptToResult(attempt, question) {
     status:              attempt.status,
     attemptNumber:       attempt.attemptNumber,
     isRetry:             attempt.isRetry,
-    transcript:          attempt.status === "completed" && attempt.transcript?.text
+    transcript:          attempt.transcript?.text
       ? { text: attempt.transcript.text, available: true }
       : { available: false },
     evaluation: attempt.status === "completed" ? {
