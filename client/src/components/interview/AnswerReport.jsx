@@ -104,6 +104,18 @@ export default function AnswerReport({
   return (
     <div className="dash-card-enter" role="region" aria-label="Answer Feedback">
 
+      {/* ── Your answer ──────────────────────────────────────────── */}
+      {answerResult?.transcript?.available && answerResult.transcript.text && (
+        <DashboardCard className="mb-4 dash-card-enter">
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/30 mb-2">
+            Your Answer
+          </p>
+          <p className="text-sm text-white/60 leading-relaxed whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+            {answerResult.transcript.text}
+          </p>
+        </DashboardCard>
+      )}
+
       {/* ── Improvement comparison (if retry) ────────────────────── */}
       <RetryComparison improvement={imp} />
 
