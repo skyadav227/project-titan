@@ -1791,20 +1791,55 @@ async function generateReport(sessionId, userId) {
     }
   }
 
-  // If report already exists and is ready, return it
-  if (session.finalReport?.status === "ready") {
-    return reportToDto(session);
-  }
+  // Atomic claim with ownership token and stale-lock recovery
+  const { v4: uuidv4 } = require("uuid");
+  const REPORT_GENERATION_LEASE_MS = 5 * 60 * 1000;
+  const now = new Date();
+  const staleThreshold = new Date(now.getTime() - REPORT_GENERATION_LEASE_MS);
+  const myToken = uuidv4();
 
-  // Mark as generating
-  if (!session.finalReport) session.finalReport = {};
-  session.finalReport.status = "generating";
-  await session.save();
+  const claimed = await InterviewSession.findOneAndUpdate(
+    {
+      _id: sessionId,
+      userId,
+      $or: [
+        { "finalReport.status": { $nin: ["ready", "generating"] } },
+        {
+          "finalReport.status": "generating",
+          "finalReport.generationStartedAt": { $ne: null, $lt: staleThreshold }
+        }
+      ]
+    },
+    {
+      $set: {
+        "finalReport.status":              "generating",
+        "finalReport.generationStartedAt": now,
+        "finalReport.generationToken":     myToken,
+      }
+    },
+    { new: true }
+  );
+
+  if (!claimed) {
+    const current = await InterviewSession.findOne({ _id: sessionId, userId });
+    if (current?.finalReport?.status === "ready") {
+      return reportToDto(current);
+    }
+    if (current?.finalReport?.status === "generating") {
+      const err = new Error("Report generation is already in progress. Please try again shortly.");
+      err.code = "REPORT_GENERATING"; err.status = 409;
+      throw err;
+    }
+    const err = new Error("Could not claim report generation slot.");
+    err.code = "INTERVIEW_NOT_ACTIVE"; err.status = 409;
+    throw err;
+  }
+  // Use `claimed` as session object from here on
 
   try {
     // Aggregate all completed questions and their best attempts
     const questions = await InterviewQuestion.find(
-      { sessionId: session._id, userId, status: { $in: ["answered", "skipped"] } },
+      { sessionId: claimed._id, userId, status: { $in: ["answered", "skipped"] } },
     ).sort({ sequenceIndex: 1 });
 
     // Separate answered from skipped — skipped are excluded from scoring
@@ -1878,7 +1913,7 @@ async function generateReport(sessionId, userId) {
 
     const aggregatedScores = {
       questionsAnswered: answeredQuestions.length,
-      retryCount:        session.progress?.retryCount || 0,
+      retryCount:        claimed.progress?.retryCount || 0,
       overallScore:      avg(allScores.overallScore) ?? 0,
       dimensions: {
         technicalAccuracy: avg(allScores.technicalAccuracy),
@@ -1899,7 +1934,7 @@ async function generateReport(sessionId, userId) {
 
     // AI synthesis (qualitative insights from the evidence)
     const aiSynthesis = await aiService.generateFinalReport({
-      session,
+      session: claimed,
       questions: answeredQuestions,
       attemptSummaries,
       aggregatedScores,
@@ -1925,7 +1960,7 @@ async function generateReport(sessionId, userId) {
       recommendations: aiSynthesis.recommendations || [],
       statistics: {
         questionsAnswered: aggregatedScores.questionsAnswered,
-        totalAttempts:     session.progress?.attemptsCount || 0,
+        totalAttempts:     claimed.progress?.attemptsCount || 0,
         retryCount:        aggregatedScores.retryCount,
         improvedAttempts:  retryImprovements.filter(r => r.delta > 0).length,
       },
@@ -1953,19 +1988,50 @@ async function generateReport(sessionId, userId) {
       },
     };
 
-    // Persist + complete session
-    session.finalReport = finalReport;
-    session.status      = ["active", "completing"].includes(session.status) ? "completed" : session.status;
-    session.completedAt = session.completedAt || new Date();
-    session.lastActivityAt = new Date();
-    await session.save();
+    // Token-gated finalization
+    const finalized = await InterviewSession.findOneAndUpdate(
+      {
+        _id: sessionId,
+        "finalReport.generationToken": myToken,
+        "finalReport.status": "generating",
+      },
+      {
+        $set: {
+          "finalReport":    { ...finalReport, generationToken: null, generationStartedAt: null },
+          status:           ["active", "completing"].includes(claimed.status) ? "completed" : claimed.status,
+          completedAt:      claimed.completedAt || new Date(),
+          lastActivityAt:   new Date(),
+        }
+      },
+      { new: true }
+    );
 
-    return reportToDto(session);
+    if (!finalized) {
+      const err = new Error(
+        "Report generation lease was lost to a newer request. " +
+        "Retrieve the current report status via GET /api/interviews/:id/report."
+      );
+      err.code = "REPORT_GENERATION_LEASE_LOST"; err.status = 409;
+      throw err;
+    }
+    return reportToDto(finalized);
 
   } catch (err) {
-    session.finalReport = session.finalReport || {};
-    session.finalReport.status = "failed";
-    await session.save().catch(() => {});
+    await InterviewSession.updateOne(
+      {
+        _id: sessionId,
+        "finalReport.generationToken": myToken,
+      },
+      {
+        $set: {
+          "finalReport.status":              "failed",
+          "finalReport.generationToken":     null,
+          "finalReport.generationStartedAt": null,
+        }
+      }
+    ).catch(() => {});
+
+    if (err.code === "REPORT_GENERATION_LEASE_LOST") throw err;
 
     const domainErr = new Error("We couldn't generate your performance report. Please try again.");
     domainErr.code = "REPORT_GENERATION_FAILED"; domainErr.status = 502;
