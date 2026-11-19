@@ -1989,6 +1989,8 @@ async function generateReport(sessionId, userId) {
     };
 
     // Token-gated finalization
+    // Preserve existing completedAt if already set (or set it now)
+    session.completedAt = session.completedAt || new Date();
     const finalized = await InterviewSession.findOneAndUpdate(
       {
         _id: sessionId,
@@ -1999,7 +2001,7 @@ async function generateReport(sessionId, userId) {
         $set: {
           "finalReport":    { ...finalReport, generationToken: null, generationStartedAt: null },
           status:           ["active", "completing"].includes(claimed.status) ? "completed" : claimed.status,
-          completedAt:      claimed.completedAt || new Date(),
+          completedAt:      session.completedAt,
           lastActivityAt:   new Date(),
         }
       },
@@ -2015,7 +2017,6 @@ async function generateReport(sessionId, userId) {
       throw err;
     }
     return reportToDto(finalized);
-
   } catch (err) {
     await InterviewSession.updateOne(
       {
