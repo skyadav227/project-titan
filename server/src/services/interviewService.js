@@ -924,22 +924,37 @@ async function reevaluateAnswer(sessionId, attemptId, userId, { isCheckpoint = f
   const { AI_MAX_RETRIES, CHECKPOINT_REEVAL_LIMIT } = require("../config/env");
   const maxReeval = isCheckpoint ? CHECKPOINT_REEVAL_LIMIT : AI_MAX_RETRIES;
 
+  const attemptFilter = isCheckpoint
+    ? {
+        _id: attemptId,
+        sessionId: session._id,
+        userId,
+        status: "failed",
+        "processing.retryable": true,
+        "processing.checkpointAttempts": { $lt: maxReeval },
+      }
+    : {
+        _id: attemptId,
+        sessionId: session._id,
+        userId,
+        status: "failed",
+        "processing.retryable": true,
+        "processing.attempts": { $lt: maxReeval },
+      };
+
+  const attemptInc = isCheckpoint
+    ? { $inc: { "processing.checkpointAttempts": 1 } }
+    : { $inc: { "processing.attempts": 1 } };
+
   const attempt = await AnswerAttempt.findOneAndUpdate(
-    {
-      _id: attemptId,
-      sessionId: session._id,
-      userId,
-      status: "failed",
-      "processing.retryable": true,
-      "processing.attempts": { $lt: maxReeval },
-    },
+    attemptFilter,
     {
       $set: {
         status: "analyzing",
         "processing.errorCode":   null,
         "processing.errorMessage": null,
       },
-      $inc: { "processing.attempts": 1 },
+      ...attemptInc,
     },
     { new: true }
   );
@@ -962,7 +977,10 @@ async function reevaluateAnswer(sessionId, attemptId, userId, { isCheckpoint = f
       err.code = "QUESTION_ALREADY_ANSWERED"; err.status = 409;
       throw err;
     }
-    if (existingAttempt.processing?.attempts >= maxReeval) {
+    const exhausted = isCheckpoint
+      ? (existingAttempt.processing?.checkpointAttempts || 0) >= maxReeval
+      : (existingAttempt.processing?.attempts || 0) >= maxReeval;
+    if (exhausted) {
       // Clear the question lock so the checkpoint can surface this question cleanly.
       // The failed attempt stays in DB — only the lock is released.
       await InterviewQuestion.updateOne(
@@ -1138,7 +1156,9 @@ async function reevaluateAnswer(sessionId, attemptId, userId, { isCheckpoint = f
     attempt.processing.errorCode    = evalErr.code    || "EVALUATION_FAILED";
     attempt.processing.errorMessage = evalErr.message || "Reevaluation failed.";
     // Still retryable if we haven't exhausted attempts
-    attempt.processing.retryable    = (attempt.processing.attempts || 0) < maxReeval;
+    attempt.processing.retryable    = isCheckpoint
+      ? (attempt.processing.checkpointAttempts || 0) < maxReeval
+      : (attempt.processing.attempts || 0) < maxReeval;
     await attempt.save().catch(() => {});
 
     // Release the session lock
@@ -1198,7 +1218,7 @@ async function getCheckpointState(sessionId, userId) {
         errorCode     = attempt.processing?.errorCode || null;
         hasTranscript = !!(attempt.transcript?.text?.trim());
         transcriptText = attempt.transcript?.text || null;
-        retriesUsed   = attempt.processing?.attempts || 0;
+        retriesUsed   = attempt.processing?.checkpointAttempts || 0;
       }
     }
 
