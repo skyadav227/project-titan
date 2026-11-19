@@ -643,6 +643,34 @@ export function InterviewProvider({ children }) {
   // The context does not call useNavigate directly because it mounts outside
   // BrowserRouter (in App.jsx above AppRouter).
   async function triggerReportGeneration(sessionId) {
+    function startReportPolling(sid) {
+      let attempts = 0;
+      const reportPollInterval = setInterval(async () => {
+        attempts++;
+        if (attempts > 15) {
+          clearInterval(reportPollInterval);
+          dispatch({ type: "SET_ERROR", payload: { code: "REPORT_GENERATION_FAILED", message: "Report is taking longer than expected." } });
+          return;
+        }
+        try {
+          const r = await getReport(sid);
+          if (r?.status === "ready" || r?.overallScore !== undefined) {
+            clearInterval(reportPollInterval);
+            dispatch({ type: "SET_REPORT", payload: r });
+            dispatch({ type: "SET_REPORT_SESSION_ID", payload: sid });
+            dispatch({ type: "SET_STATE", payload: "report_ready" });
+          } else if (r?.status === "failed") {
+            clearInterval(reportPollInterval);
+            dispatch({ type: "SET_ERROR", payload: {
+              code: "REPORT_GENERATION_FAILED",
+              message: "Report generation failed. Your session data is saved — please try again."
+            }});
+          }
+          // status === "generating" → keep polling
+        } catch { /* keep polling */ }
+      }, 3000);
+    }
+
     try {
       const reportResult = await generateReport(sessionId);
 
@@ -652,31 +680,19 @@ export function InterviewProvider({ children }) {
         dispatch({ type: "SET_STATE", payload: "report_ready" });
       } else {
         // Poll for report completion
-        let attempts = 0;
-        const reportPollInterval = setInterval(async () => {
-          attempts++;
-          if (attempts > 15) {
-            clearInterval(reportPollInterval);
-            dispatch({ type: "SET_ERROR", payload: { code: "REPORT_GENERATION_FAILED", message: "Report is taking longer than expected." } });
-            return;
-          }
-          try {
-            const r = await getReport(sessionId);
-            if (r?.status === "ready" || r?.overallScore !== undefined) {
-              clearInterval(reportPollInterval);
-              dispatch({ type: "SET_REPORT", payload: r });
-              dispatch({ type: "SET_REPORT_SESSION_ID", payload: sessionId });
-              dispatch({ type: "SET_STATE", payload: "report_ready" });
-            }
-          } catch { /* keep polling */ }
-        }, 3000);
+        startReportPolling(sessionId);
       }
     } catch (err) {
+      if (err.code === "REPORT_GENERATION_LEASE_LOST" || err.code === "REPORT_GENERATING") {
+        startReportPolling(sessionId);
+        return;
+      }
       // Report generation failed — do NOT set report_ready. The session data is
       // preserved on the backend; the user can retry from the error state.
-      // Setting report_ready here would falsely claim a report exists and trigger
-      // InterviewPage to navigate to /history/:id where nothing would load.
-      dispatch({ type: "SET_ERROR", payload: { code: "REPORT_GENERATION_FAILED", message: "We couldn't generate your report. Your session data is saved — please try again." } });
+      dispatch({ type: "SET_ERROR", payload: {
+        code: "REPORT_GENERATION_FAILED",
+        message: "We couldn't generate your report. Your session data is saved — please try again."
+      }});
     }
   }
 
