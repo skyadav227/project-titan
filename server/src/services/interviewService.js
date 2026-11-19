@@ -1204,36 +1204,96 @@ async function getCheckpointState(sessionId, userId) {
 
   const unresolvedQuestions = [];
   for (const q of unresolvedDocs) {
-    let attemptId = null, errorCode = null, hasTranscript = false,
-        transcriptText = null, retriesUsed = 0;
+    // ── Phase 0 — establish boundary ────────────────────────────────────────
+    let minAttemptNumber = 1;
+    let boundaryEstablished = true;
 
-    if (q.pendingFailedAttemptId) {
-      const attempt = await AnswerAttempt.findOne(
-        { _id: q.pendingFailedAttemptId, sessionId: session._id, userId },
-        { "transcript.text": 1, "processing.attempts": 1,
-          "processing.errorCode": 1, status: 1 }
+    if (q.latestAttemptId) {
+      const lastSuccess = await AnswerAttempt.findOne(
+        {
+          _id:        q.latestAttemptId,
+          questionId: q._id,
+          sessionId:  session._id,
+          userId,
+          status:     "completed",
+        },
+        { attemptNumber: 1 }
       ).lean();
-      if (attempt) {
-        attemptId     = attempt._id;
-        errorCode     = attempt.processing?.errorCode || null;
-        hasTranscript = !!(attempt.transcript?.text?.trim());
-        transcriptText = attempt.transcript?.text || null;
-        retriesUsed   = attempt.processing?.checkpointAttempts || 0;
+
+      if (lastSuccess) {
+        minAttemptNumber = lastSuccess.attemptNumber + 1;
+      } else {
+        boundaryEstablished = false;
       }
     }
 
+    // ── Phase A — direct pointer, boundary-checked ───────────────────────────
+    let attempt = null;
+    if (boundaryEstablished && q.pendingFailedAttemptId) {
+      attempt = await AnswerAttempt.findOne(
+        {
+          _id:           q.pendingFailedAttemptId,
+          questionId:    q._id,
+          sessionId:     session._id,
+          userId,
+          status:        "failed",
+          attemptNumber: { $gte: minAttemptNumber },
+        },
+        { "transcript.text": 1, "processing.attempts": 1,
+          "processing.checkpointAttempts": 1, "processing.errorCode": 1,
+          status: 1, attemptNumber: 1 }
+      ).lean();
+    }
+
+    // ── Phase B — bounded fallback ───────────────────────────────────────────
+    if (!attempt && boundaryEstablished) {
+      attempt = await AnswerAttempt.findOne(
+        {
+          questionId:    q._id,
+          sessionId:     session._id,
+          userId,
+          status:        "failed",
+          attemptNumber: { $gte: minAttemptNumber },
+        },
+        { "transcript.text": 1, "processing.attempts": 1,
+          "processing.checkpointAttempts": 1, "processing.errorCode": 1,
+          status: 1, attemptNumber: 1 }
+      ).sort({ attemptNumber: -1 }).lean();
+    }
+
+    // ── Phase C — determine outcome ──────────────────────────────────────────
+    if (!boundaryEstablished) {
+      unresolvedQuestions.push({
+        id: q._id, text: q.text, attemptId: null,
+        errorCode: "CHECKPOINT_INTEGRITY_ERROR",
+        hasTranscript: false, transcriptText: null,
+        retriesUsed: 0, retriesRemaining: 0,
+        canReevaluate: false, canReAnswer: false,
+      });
+      continue;
+    }
+    if (!attempt) {
+      unresolvedQuestions.push({
+        id: q._id, text: q.text, attemptId: null,
+        errorCode: "NO_ATTEMPT_FOUND",
+        hasTranscript: false, transcriptText: null,
+        retriesUsed: 0, retriesRemaining: 0,
+        canReevaluate: false, canReAnswer: false,
+      });
+      continue;
+    }
+    // Normal path
+    const retriesUsed = attempt.processing?.checkpointAttempts || 0;
     const retriesRemaining = Math.max(0, CHECKPOINT_REEVAL_LIMIT - retriesUsed);
+    const hasTranscript = !!(attempt.transcript?.text?.trim());
+    const errorCode = attempt.processing?.errorCode || null;
+    const STT_FAILURE_CODES = new Set(["TRANSCRIPTION_FAILED", "SPEECH_EMPTY_TRANSCRIPT", "SPEECH_MALFORMED_RESPONSE"]);
     unresolvedQuestions.push({
-      id:               q._id,
-      text:             q.text,
-      attemptId,
-      errorCode,
-      hasTranscript,
-      transcriptText,
-      retriesUsed,
-      retriesRemaining,
-      canReevaluate:    hasTranscript && retriesRemaining > 0,
-      canReAnswer:      !hasTranscript,
+      id: q._id, text: q.text, attemptId: attempt._id, errorCode,
+      hasTranscript, transcriptText: attempt.transcript?.text || null,
+      retriesUsed, retriesRemaining,
+      canReevaluate: hasTranscript && retriesRemaining > 0,
+      canReAnswer:   !hasTranscript || STT_FAILURE_CODES.has(errorCode),
     });
   }
 
