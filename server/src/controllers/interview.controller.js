@@ -212,10 +212,12 @@ async function endInterview(req, res, next) {
 // ── POST /api/interviews/:id/answers/:answerAttemptId/reevaluate ──────────────
 async function reevaluateAnswer(req, res, next) {
   try {
+    const isCheckpoint = req.body?.isCheckpoint === true;
     const result = await interviewService.reevaluateAnswer(
       req.params.id,
       req.params.answerAttemptId,
-      req.user.id
+      req.user.id,
+      { isCheckpoint }
     );
     // Return 200 (completed synchronously) — reevaluation is always synchronous in V1
     return res.status(200).json({ success: true, data: result });
@@ -293,6 +295,11 @@ function _handleDomainError(err, res, next) {
     INTERVIEW_NOT_RESOLVED:     409,
     CHECKPOINT_EXHAUSTED:       422,
     EVALUATION_PENDING_REEVALUATION: 409,
+    QUESTION_SKIPPED_DURING_EVALUATION: 409,
+    REPORT_GENERATION_LEASE_LOST:       409,
+    REPORT_GENERATING:                  409,
+    CHECKPOINT_INTEGRITY_ERROR:         422,
+    NO_ATTEMPT_FOUND:                   422,
     TRANSCRIPTION_FAILED:       502,
     EVALUATION_FAILED:          502,
     QUESTION_GENERATION_FAILED: 502,
