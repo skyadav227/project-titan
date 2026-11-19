@@ -452,7 +452,7 @@ async function submitAnswer(sessionId, questionId, userId, { file, durationMs, i
     err.code = "QUESTION_NOT_FOUND"; err.status = 404;
     throw err;
   }
-  if (question.status === "answered") {
+  if (question.status === "answered" || question.status === "skipped") {
     const err = new Error("This question has already been answered.");
     err.code = "QUESTION_ALREADY_ANSWERED"; err.status = 409;
     throw err;
@@ -1035,6 +1035,16 @@ async function reevaluateAnswer(sessionId, attemptId, userId, { isCheckpoint = f
     throw err;
   }
 
+  if (question.status === "skipped") {
+    await InterviewSession.updateOne(
+      { _id: session._id },
+      { $set: { "processing.operation": null, "processing.operationId": null } }
+    ).catch(() => {});
+    const err = new Error("This question has been permanently skipped and cannot be reevaluated.");
+    err.code = "QUESTION_ALREADY_ANSWERED"; err.status = 409;
+    throw err;
+  }
+
   try {
     // Recompute speech metrics from the saved transcript (deterministic)
     const speechMetrics = speechService.computeSpeechMetrics({
@@ -1128,11 +1138,31 @@ async function reevaluateAnswer(sessionId, attemptId, userId, { isCheckpoint = f
       (session.progress.lastCompletedQuestionId &&
        session.progress.lastCompletedQuestionId.equals(question._id));
 
-    question.latestAttemptId         = attempt._id;
-    question.pendingFailedAttemptId  = null;
-    question.status                   = "answered";
-    question.completedAt               = new Date();
-    await question.save();
+    const updatedQuestion = await InterviewQuestion.findOneAndUpdate(
+      { _id: question._id, status: { $ne: "skipped" } },
+      {
+        $set: {
+          status: "answered",
+          latestAttemptId: attempt._id,
+          pendingFailedAttemptId: null,
+          completedAt: new Date(),
+        }
+      },
+      { new: true }
+    );
+
+    if (!updatedQuestion) {
+      // Skip won the race
+      session.processing.operation = null;
+      session.processing.operationId = null;
+      await session.save();
+      const err = new Error(
+        "This question was permanently skipped while evaluation was in progress. " +
+        "Your original answer and transcript are preserved."
+      );
+      err.code = "QUESTION_SKIPPED_DURING_EVALUATION"; err.status = 409;
+      throw err;
+    }
 
     // Only increment questionsCompleted if this question wasn't already counted.
     // For the common case (first attempt failed, reevaluation succeeds), the
@@ -1140,14 +1170,14 @@ async function reevaluateAnswer(sessionId, attemptId, userId, { isCheckpoint = f
     if (!wasAlreadyCounted) {
       session.progress.questionsCompleted = (session.progress.questionsCompleted || 0) + 1;
     }
-    session.progress.lastCompletedQuestionId = question._id;
+    session.progress.lastCompletedQuestionId = updatedQuestion._id;
     session.processing.operation             = null;
     session.processing.operationId            = null;
     session.processing.errorCode              = null;
     session.lastActivityAt                    = new Date();
     await session.save();
 
-    return answerAttemptToResult(attempt, question);
+    return answerAttemptToResult(attempt, updatedQuestion);
 
   } catch (evalErr) {
     // ── 8. Evaluation failed again — release locks, mark attempt failed ──────
