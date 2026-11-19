@@ -195,6 +195,9 @@ const finalReportSchema = new mongoose.Schema(
       default: "not_started",
     },
 
+    generationStartedAt: { type: Date,   default: null },
+    generationToken:     { type: String, default: null },
+
     generatedAt: { type: Date, default: null },
 
     aiMetadata: {
