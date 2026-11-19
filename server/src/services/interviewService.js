@@ -1322,7 +1322,7 @@ async function getCheckpointState(sessionId, userId) {
       id: q._id, text: q.text, attemptId: attempt._id, errorCode,
       hasTranscript, transcriptText: attempt.transcript?.text || null,
       retriesUsed, retriesRemaining,
-      canReevaluate: hasTranscript && retriesRemaining > 0,
+      canReevaluate:    hasTranscript && retriesRemaining > 0,
       canReAnswer:   !hasTranscript || STT_FAILURE_CODES.has(errorCode),
     });
   }
