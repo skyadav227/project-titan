@@ -218,12 +218,13 @@ const answerAttemptSchema = new mongoose.Schema(
 
     // Processing operation tracking for idempotency + recovery
     processing: {
-      operationId:    { type: String, default: null },
-      errorCode:      { type: String, default: null },
-      errorMessage:   { type: String, default: null },
-      retryable:      { type: Boolean, default: false },
-      attempts:       { type: Number, default: 0, min: 0 },
-      lastProcessedAt:{ type: Date, default: null },
+      operationId:        { type: String, default: null },
+      errorCode:          { type: String, default: null },
+      errorMessage:       { type: String, default: null },
+      retryable:          { type: Boolean, default: false },
+      attempts:           { type: Number, default: 0, min: 0 },
+      checkpointAttempts: { type: Number, default: 0, min: 0 },
+      lastProcessedAt:    { type: Date, default: null },
     },
 
     // Audio metadata — binaries stored externally, never in MongoDB
