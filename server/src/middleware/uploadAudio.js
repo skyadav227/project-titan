@@ -45,13 +45,15 @@ const storage = multer.diskStorage({
     cb(null, UPLOADS_PATH);
   },
   filename(_req, file, cb) {
-    const ext = MIME_TO_EXT[file.mimetype] || path.extname(file.originalname).toLowerCase() || ".audio";
+    const baseMime = file.mimetype.split(";")[0].trim().toLowerCase();
+    const ext = MIME_TO_EXT[baseMime] || path.extname(file.originalname).toLowerCase() || ".audio";
     cb(null, `audio_${uuidv4()}${ext}`);
   },
 });
 
 function fileFilter(_req, file, cb) {
-  if (ACCEPTED_MIME_SET.has(file.mimetype)) {
+  const baseMime = file.mimetype.split(";")[0].trim().toLowerCase();
+  if (ACCEPTED_MIME_SET.has(baseMime)) {
     return cb(null, true);
   }
   const err = new Error("Unsupported audio format. Please record and upload a supported audio file.");
