@@ -443,7 +443,7 @@ export function InterviewProvider({ children }) {
         dispatch({ type: "SET_STATE", payload: "showing_report" });
       }
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: err });
+      dispatch({ type: "SET_ERROR", payload: { ...err, _isQuestionGenFailure: true } });
     } finally {
       dispatch({ type: "SET_LOADING", payload: false });
     }
@@ -591,9 +591,11 @@ export function InterviewProvider({ children }) {
     try {
       const result = await requestExplanation(session.id, { questionId: question.id, topic });
       dispatch({ type: "SET_EXPLANATION", payload: result });
+      dispatch({ type: "SET_EXPLANATION_ERROR", payload: null });
       dispatch({ type: "SET_STATE", payload: "explaining" });
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: err });
+      dispatch({ type: "SET_EXPLANATION_ERROR", payload: err });
+      // uiState stays "showing_report" — do NOT dispatch SET_ERROR or SET_STATE
     } finally {
       dispatch({ type: "SET_LOADING", payload: false });
     }
@@ -620,7 +622,7 @@ export function InterviewProvider({ children }) {
         dispatch({ type: "SET_STATE", payload: "asking" });
       }
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: err });
+      dispatch({ type: "SET_ERROR", payload: { ...err, _isQuestionGenFailure: true } });
     } finally {
       dispatch({ type: "SET_LOADING", payload: false });
     }
@@ -652,7 +654,7 @@ export function InterviewProvider({ children }) {
         await triggerReportGeneration(session.id);
       }
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: err });
+      dispatch({ type: "SET_ERROR", payload: { ...err, _isFinishFailure: true, _reason: reason } });
     } finally {
       dispatch({ type: "SET_LOADING", payload: false });
     }
@@ -888,6 +890,11 @@ export function InterviewProvider({ children }) {
     skipQuestionAction,
     reevaluateAtCheckpoint,
     reAnswerAtCheckpoint,
+    // Report retry
+    retryReportGeneration: () => {
+      const { session } = state;
+      if (session?.id) triggerReportGeneration(session.id);
+    },
   };
 
   return (

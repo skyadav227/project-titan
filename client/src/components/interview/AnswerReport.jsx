@@ -97,6 +97,7 @@ export default function AnswerReport({
   onExplain,
   onEnd,
   isLoading,
+  explanationError,
 }) {
   const ev   = answerResult?.evaluation || null;
   const imp  = answerResult?.improvement || null;
@@ -268,6 +269,11 @@ export default function AnswerReport({
               Explain
             </Button>
           </div>
+          {explanationError && (
+            <p className="mt-2 text-xs text-red-400/70">
+              Couldn't load explanation. Try again.
+            </p>
+          )}
         </DashboardCard>
       )}
 

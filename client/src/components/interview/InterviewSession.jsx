@@ -166,7 +166,7 @@ function CompletingState() {
 }
 
 // ── Error state ───────────────────────────────────────────────────────────────
-function ErrorState({ error, onDismiss, hasPendingAttempt, onReevaluate, isReevaluating, submittedAnswer }) {
+function ErrorState({ error, onDismiss, hasPendingAttempt, onReevaluate, isReevaluating, submittedAnswer, onRetryGen, onRetryReport, onRetryFinish }) {
   const isRetryExhausted = error?.code === "RETRY_LIMIT_REACHED";
 
   return (
@@ -189,20 +189,40 @@ function ErrorState({ error, onDismiss, hasPendingAttempt, onReevaluate, isReeva
           {error?.message || "Something went wrong."}
         </p>
         <p className="mt-1 text-xs text-white/35">
-          {hasPendingAttempt && !isRetryExhausted
-            ? "Your answer was saved. Click Try Again to re-evaluate it."
-            : isRetryExhausted
-              ? "Please submit a new answer to continue."
-              : "Your session is preserved."}
+          {error?._isQuestionGenFailure
+            ? "We couldn't generate the next question. Please try again."
+            : error?.code === "REPORT_GENERATION_FAILED"
+              ? "Your session data is saved. Click to retry report generation."
+              : error?._isFinishFailure
+                ? "Something went wrong while ending the session. Please try again."
+                : error?.code === "RECONCILIATION_FAILED"
+                  ? "We couldn't verify your progress. Please try again."
+                  : hasPendingAttempt && !isRetryExhausted
+                    ? "Your answer was saved. Click Try Again to re-evaluate it."
+                    : isRetryExhausted
+                      ? "Please submit a new answer to continue."
+                      : "Your session is preserved."}
         </p>
       </div>
       <div className="flex gap-3">
-        {hasPendingAttempt && !isRetryExhausted ? (
+        {error?._isQuestionGenFailure ? (
+          <Button variant="secondary" size="sm" onClick={onRetryGen} disabled={isReevaluating}>
+            Retry generating next question
+          </Button>
+        ) : error?.code === "REPORT_GENERATION_FAILED" ? (
+          <Button variant="secondary" size="sm" onClick={onRetryReport} disabled={isReevaluating}>
+            Retry report generation
+          </Button>
+        ) : error?._isFinishFailure ? (
+          <Button variant="secondary" size="sm" onClick={() => onRetryFinish(error._reason)} disabled={isReevaluating}>
+            Try Again
+          </Button>
+        ) : hasPendingAttempt && !isRetryExhausted ? (
           <Button variant="secondary" size="sm" onClick={onReevaluate} isLoading={isReevaluating} disabled={isReevaluating}>
             Try Again
           </Button>
         ) : (
-          <Button variant="secondary" size="sm" onClick={onDismiss}>
+          <Button variant="secondary" size="sm" onClick={onDismiss} disabled={isReevaluating}>
             Try Again
           </Button>
         )}
@@ -344,6 +364,7 @@ export default function InterviewSession() {
     isLoading,
     pendingAttemptId,
     failedAttemptTranscript,
+    explanationError,
     submitVoiceAnswer,
     submitTextAnswerAction,
     continueToNext,
@@ -353,6 +374,8 @@ export default function InterviewSession() {
     continueFromExplanation,
     finishInterview,
     clearError,
+    reconcileAndRecover,
+    retryReportGeneration,
   } = useInterview();
 
   const { getKey, resetKey } = useIdempotencyKey();
@@ -415,11 +438,14 @@ export default function InterviewSession() {
       <div className="max-w-xl mx-auto">
         <ErrorState
           error={error}
-          onDismiss={clearError}
+          onDismiss={reconcileAndRecover}
           hasPendingAttempt={!!pendingAttemptId}
           onReevaluate={reevaluateFailedAttempt}
           isReevaluating={isLoading}
           submittedAnswer={failedAttemptTranscript}
+          onRetryGen={continueToNext}
+          onRetryReport={retryReportGeneration}
+          onRetryFinish={(reason) => finishInterview(reason)}
         />
       </div>
     );
@@ -486,6 +512,7 @@ export default function InterviewSession() {
           } : null}
           onEnd={finishInterview}
           isLoading={isLoading}
+          explanationError={explanationError}
         />
       </div>
     );
