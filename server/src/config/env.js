@@ -58,6 +58,13 @@ module.exports = {
   // Interview configuration
   MAX_RETRIES_PER_QUESTION: parseInt(process.env.MAX_RETRIES_PER_QUESTION, 10) || 2,
   AI_MAX_RETRIES: parseInt(process.env.AI_MAX_RETRIES, 10) || 3,
+  AI_EVAL_MODELS: (() => {
+    const raw = process.env.AI_EVAL_MODELS || "";
+    const seen = new Set();
+    return raw.split(",")
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && !seen.has(s) && seen.add(s));
+  })(),
   CHECKPOINT_REEVAL_LIMIT: parseInt(process.env.CHECKPOINT_REEVAL_LIMIT, 10) || 2,
   AI_TIMEOUT_MS: parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000,
 

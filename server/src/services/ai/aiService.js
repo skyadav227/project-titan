@@ -10,7 +10,7 @@
  */
 "use strict";
 
-const { AI_PROVIDER, AI_MAX_RETRIES, AI_TIMEOUT_MS } = require("../../config/env");
+const { AI_PROVIDER, AI_MAX_RETRIES, AI_TIMEOUT_MS, AI_EVAL_MODELS } = require("../../config/env");
 const { buildResumeAnalysisPrompt } = require("./prompts/resume/analyzeResume");
 const { buildQuestionGenerationPrompt, parseQuestionGenerationResponse } = require("./prompts/interview/question/generateQuestion");
 const { buildEvaluationPrompt, parseEvaluationResponse } = require("./prompts/interview/evaluation/evaluateAnswer");
@@ -59,6 +59,82 @@ async function withRetry(fn, maxRetries = AI_MAX_RETRIES) {
       console.warn(`[aiService] Retry ${attempt}/${maxRetries} after error: ${err.code}`);
     }
   }
+  throw lastErr;
+}
+
+// ── Per-evaluation model fallback ─────────────────────────────────────────────
+
+const MAX_TRANSIENT_RETRIES = 1;
+// Hard ceiling on total HTTP requests = deduplicated model count × (1 + MAX_TRANSIENT_RETRIES)
+
+const ABORT_ALL    = new Set(["AI_CONFIG_ERROR", "AI_AUTH_ERROR"]);
+const SKIP_TO_NEXT = new Set(["AI_REASONING_OVERFLOW", "AI_EMPTY_RESPONSE", "AI_RATE_LIMIT",
+                               "AI_PROVIDER_ERROR", "AI_INVALID_JSON", "AI_SCHEMA_MISMATCH"]);
+const TRANSIENT    = new Set(["AI_NETWORK_ERROR"]);
+
+/**
+ * Try each model in `modelList` in order. For each model:
+ *   - ABORT_ALL errors stop everything immediately.
+ *   - SKIP_TO_NEXT errors advance immediately to the next model.
+ *   - TRANSIENT errors retry the same model once (500 ms delay) then advance.
+ *   - Unknown error codes advance without retry.
+ * Returns the first successful result. Throws the last error if all models fail.
+ * Maximum requests = modelList.length × 2 (after deduplication).
+ *
+ * @param {(model: string) => Promise<any>} operationFn - Called with one model ID
+ * @param {string[]} modelList - Ordered list of model IDs to try
+ * @returns {Promise<any>}
+ */
+async function withEvalModelFallback(operationFn, modelList) {
+  // Runtime deduplication (preserves order)
+  const seen   = new Set();
+  const models = modelList.filter(m => !seen.has(m) && seen.add(m));
+
+  if (models.length === 0) {
+    const err = new Error(
+      "withEvalModelFallback: model list is empty after deduplication. " +
+      "Check AI_EVAL_MODELS configuration."
+    );
+    err.code = "AI_CONFIG_ERROR";
+    throw err;
+  }
+
+  let lastErr;
+
+  for (const model of models) {
+    let transientAttempts = 0;
+
+    while (transientAttempts <= MAX_TRANSIENT_RETRIES) {
+      try {
+        return await operationFn(model);
+      } catch (err) {
+        lastErr = err;
+
+        if (ABORT_ALL.has(err.code)) throw err;
+
+        if (SKIP_TO_NEXT.has(err.code)) {
+          console.warn(`[aiService] ${model} → ${err.code}, trying next model`);
+          break;
+        }
+
+        if (TRANSIENT.has(err.code)) {
+          if (transientAttempts < MAX_TRANSIENT_RETRIES) {
+            transientAttempts++;
+            console.warn(`[aiService] ${model} → ${err.code} transient, retry ${transientAttempts}`);
+            await new Promise(r => setTimeout(r, 500));
+            continue;
+          }
+          console.warn(`[aiService] ${model} → ${err.code} transient limit reached, trying next model`);
+          break;
+        }
+
+        // Unknown error code — advance without retry
+        console.warn(`[aiService] ${model} → unknown code ${err.code || "(none)"}, trying next model`);
+        break;
+      }
+    }
+  }
+
   throw lastErr;
 }
 
@@ -174,6 +250,16 @@ async function evaluateAnswer(ctx) {
   const adapter = getAdapter();
   const { systemPrompt, userPrompt } = buildEvaluationPrompt(ctx);
 
+  if (AI_EVAL_MODELS.length > 0) {
+    return withEvalModelFallback(async (model) => {
+      const raw = await adapter.generate(systemPrompt, userPrompt, {
+        maxTokens: 2000, temperature: 0.1, model,
+      });
+      return parseEvaluationResponse(raw);
+    }, AI_EVAL_MODELS);
+  }
+
+  // AI_EVAL_MODELS not configured — existing behavior unchanged
   return withRetry(async () => {
     const raw = await adapter.generate(systemPrompt, userPrompt, {
       maxTokens:   2000,
@@ -221,4 +307,8 @@ async function generateFinalReport(ctx) {
   });
 }
 
-module.exports = { analyzeResume, generateQuestion, evaluateAnswer, generateExplanation, generateFinalReport };
+module.exports = {
+  analyzeResume, generateQuestion, evaluateAnswer,
+  generateExplanation, generateFinalReport,
+  withEvalModelFallback,  // exported for deterministic tests only
+};
