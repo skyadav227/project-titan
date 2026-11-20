@@ -83,14 +83,14 @@ test("A6 Controller passes attemptId for EVALUATION_PENDING_REEVALUATION", () =>
 
 test("A7 reevaluateAnswer does NOT create a new AnswerAttempt document", () => {
   const fnStart = SERVICE_SRC.indexOf("async function reevaluateAnswer");
-  const fnEnd   = SERVICE_SRC.indexOf("// ── Phase 6:", fnStart);
+  const fnEnd   = SERVICE_SRC.indexOf("// ── Phase 5c:", fnStart);
   const fnBody  = SERVICE_SRC.slice(fnStart, fnEnd);
   assert(!fnBody.includes("new AnswerAttempt("), "reevaluateAnswer must not create new AnswerAttempt");
 });
 
 test("A8 reevaluateAnswer updates existing attempt in-place (findOneAndUpdate)", () => {
   const fnStart = SERVICE_SRC.indexOf("async function reevaluateAnswer");
-  const fnEnd   = SERVICE_SRC.indexOf("// ── Phase 6:", fnStart);
+  const fnEnd   = SERVICE_SRC.indexOf("// ── Phase 5c:", fnStart);
   const fnBody  = SERVICE_SRC.slice(fnStart, fnEnd);
   assert(fnBody.includes("findOneAndUpdate"), "reevaluateAnswer must use findOneAndUpdate for atomic claim");
   assert(fnBody.includes("status: \"analyzing\""), "Must transition attempt to analyzing atomically");
@@ -103,7 +103,7 @@ test("A9 latestAttemptId only written on success path, never on failure path", (
   assert(latestInSubmit > evalFailIdx, "latestAttemptId assignment must be in success path, after the failure catch");
   // In reevaluateAnswer: also only on success — search within the function body
   const reevalStart = SERVICE_SRC.indexOf("async function reevaluateAnswer");
-  const reevalEnd   = SERVICE_SRC.indexOf("// ── Phase 6:", reevalStart);
+  const reevalEnd   = SERVICE_SRC.indexOf("// ── Phase 5c:", reevalStart);
   const reevalBody  = SERVICE_SRC.slice(reevalStart, reevalEnd);
   assert(reevalBody.includes("latestAttemptId"),
     "reevaluateAnswer must set latestAttemptId on success");
