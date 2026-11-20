@@ -27,7 +27,7 @@ const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
  * @throws {Error} With code 'AI_PROVIDER_ERROR' on failure
  */
 async function generate(systemPrompt, userPrompt, options = {}) {
-  const { maxTokens = 4096, temperature = 0.1 } = options;
+  const { maxTokens = 4096, temperature = 0.1, model = AI_MODEL } = options;
 
   if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === "placeholder") {
     const err = new Error(
@@ -38,7 +38,7 @@ async function generate(systemPrompt, userPrompt, options = {}) {
   }
 
   const body = {
-    model: AI_MODEL,
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user",   content: userPrompt   },
@@ -105,6 +105,13 @@ async function generate(systemPrompt, userPrompt, options = {}) {
       err.code          = "AI_RATE_LIMIT";
       err.status        = 429;
       err.retryAfterMs  = retryAfterSec ? retryAfterSec * 1000 : null;
+      throw err;
+    }
+
+    if (response.status === 401) {
+      const err = new Error("OpenRouter authentication failed. Check OPENROUTER_API_KEY in your .env file.");
+      err.code   = "AI_AUTH_ERROR";
+      err.status = 401;
       throw err;
     }
 
