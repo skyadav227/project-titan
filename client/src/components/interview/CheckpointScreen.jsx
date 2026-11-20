@@ -68,7 +68,7 @@ function CheckIcon() {
 }
 
 // ── Single question row ───────────────────────────────────────────────────────
-function QuestionRow({ question, isResolved, isLoading, onReevaluate, onReAnswer, onSkip }) {
+function QuestionRow({ question, isResolved, isLoading, onReevaluate, onReAnswer, onSkip, questionError }) {
   const [confirmSkip, setConfirmSkip] = useState(false);
 
   const {
@@ -202,6 +202,11 @@ function QuestionRow({ question, isResolved, isLoading, onReevaluate, onReAnswer
           </Button>
         </div>
       )}
+      {questionError && (
+        <p className="mt-2 text-xs text-red-400/70">
+          {questionError.message || "Something went wrong. Please try again."}
+        </p>
+      )}
     </DashboardCard>
   );
 }
@@ -210,6 +215,7 @@ function QuestionRow({ question, isResolved, isLoading, onReevaluate, onReAnswer
 export default function CheckpointScreen() {
   const {
     checkpointState,
+    checkpointError,
     skipQuestionAction,
     reevaluateAtCheckpoint,
     reAnswerAtCheckpoint,
@@ -260,7 +266,7 @@ export default function CheckpointScreen() {
   async function handleReevaluate(attemptId, questionId) {
     setQuestionLoading(questionId, true);
     try {
-      await reevaluateAtCheckpoint(attemptId);
+      await reevaluateAtCheckpoint(questionId, attemptId);  // both forwarded
     } finally {
       setQuestionLoading(questionId, false);
     }
@@ -345,6 +351,7 @@ export default function CheckpointScreen() {
           onReevaluate={(attemptId) => handleReevaluate(attemptId, question.id)}
           onReAnswer={handleReAnswer}
           onSkip={handleSkip}
+          questionError={checkpointError?.[question.id] || null}
         />
       ))}
 

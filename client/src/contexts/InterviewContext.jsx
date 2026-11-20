@@ -525,6 +525,7 @@ export function InterviewProvider({ children }) {
 
     try {
       await skipQuestion(session.id, questionId);
+      dispatch({ type: "CLEAR_CHECKPOINT_ERROR", payload: questionId });
       // Re-fetch checkpoint state
       const cpState = await getCheckpointState(session.id);
       dispatch({ type: "SET_CHECKPOINT_STATE", payload: cpState });
@@ -533,12 +534,13 @@ export function InterviewProvider({ children }) {
         await triggerReportGeneration(session.id);
       }
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: err });
+      dispatch({ type: "SET_CHECKPOINT_ERROR", payload: { questionId, error: err } });
+      // Does NOT dispatch SET_ERROR
     }
   }, [state]);
 
   // ── Reevaluate at checkpoint ──────────────────────────────────────────────
-  const reevaluateAtCheckpoint = useCallback(async (attemptId) => {
+  const reevaluateAtCheckpoint = useCallback(async (questionId, attemptId) => {
     const { session } = state;
     if (!session?.id || !attemptId) return;
 
@@ -548,6 +550,7 @@ export function InterviewProvider({ children }) {
       // CHECKPOINT_REEVAL_LIMIT when invoked from the checkpoint flow.
       // We pass a flag via a custom header so we don't change the URL contract.
       await reevaluateAnswer(session.id, attemptId, { isCheckpoint: true });
+      dispatch({ type: "CLEAR_CHECKPOINT_ERROR", payload: questionId });
       const cpState = await getCheckpointState(session.id);
       dispatch({ type: "SET_CHECKPOINT_STATE", payload: cpState });
       if (cpState.resolved) {
@@ -558,7 +561,8 @@ export function InterviewProvider({ children }) {
       // Re-fetch checkpoint state to reflect current retries remaining even on error
       const cpState = await getCheckpointState(session.id).catch(() => null);
       if (cpState) dispatch({ type: "SET_CHECKPOINT_STATE", payload: cpState });
-      dispatch({ type: "SET_ERROR", payload: err });
+      dispatch({ type: "SET_CHECKPOINT_ERROR", payload: { questionId, error: err } });
+      // Does NOT dispatch SET_ERROR — stays on checkpoint screen
     }
   }, [state]);
 
@@ -570,13 +574,15 @@ export function InterviewProvider({ children }) {
     try {
       // retryQuestion resets the question to 'asked' and allows fresh recording
       const result = await retryQuestion(session.id, questionId);
+      dispatch({ type: "CLEAR_CHECKPOINT_ERROR", payload: questionId });
       dispatch({ type: "SET_QUESTION", payload: result.question });
       dispatch({ type: "SET_STATE", payload: "asking" });
       // After submission completes (via continueToNext), if backend returns
       // action:'checkpoint' again, the existing continueToNext handler will
       // re-enter the checkpoint state.
     } catch (err) {
-      dispatch({ type: "SET_ERROR", payload: err });
+      dispatch({ type: "SET_CHECKPOINT_ERROR", payload: { questionId, error: err } });
+      // Does NOT dispatch SET_ERROR
     }
   }, [state]);
 
