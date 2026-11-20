@@ -79,6 +79,8 @@ const INITIAL_STATE = {
   pendingAttemptId: null,     // set when a submission failed AI evaluation — routes "Try Again" to reevaluate
   failedAttemptTranscript: null,  // transcript text from a failed evaluation attempt
   checkpointState: null,      // { unresolvedQuestions, resolved? } from checkpoint endpoint
+  checkpointError: {},        // { [questionId]: Error } — per-question, never mixes with global error
+  explanationError: null,     // Error | null — local to showing_report, never changes uiState
 };
 
 function reducer(state, action) {
@@ -111,6 +113,25 @@ function reducer(state, action) {
       return { ...state, failedAttemptTranscript: action.payload };
     case "SET_CHECKPOINT_STATE":
       return { ...state, checkpointState: action.payload };
+    case "SET_CHECKPOINT_ERROR":
+      if (action.payload === null) {
+        return { ...state, checkpointError: {} };
+      }
+      // action.payload = { questionId, error } — adds/updates one entry only
+      return {
+        ...state,
+        checkpointError: {
+          ...state.checkpointError,
+          [action.payload.questionId]: action.payload.error,
+        },
+      };
+    case "CLEAR_CHECKPOINT_ERROR": {
+      // action.payload = questionId string — removes one entry only
+      const { [action.payload]: _removed, ...remainingErrors } = state.checkpointError;
+      return { ...state, checkpointError: remainingErrors };
+    }
+    case "SET_EXPLANATION_ERROR":
+      return { ...state, explanationError: action.payload };
     case "RESET":
       return { ...INITIAL_STATE };
     default:
@@ -696,6 +717,117 @@ export function InterviewProvider({ children }) {
     }
   }
 
+  // ── Reconcile and recover from error ─────────────────────────────────────
+  // Backend-verified recovery: queries getCurrentQuestion to determine where
+  // the user actually is, then transitions to the correct state without
+  // clearing any state prematurely. Replaces clearError for the ErrorState path.
+  const reconcileAndRecover = useCallback(async () => {
+    const { session } = state;
+    if (!session?.id) {
+      dispatch({ type: "SET_STATE", payload: "setup" });
+      return;
+    }
+    dispatch({ type: "SET_LOADING", payload: true });
+    try {
+      const question = await getCurrentQuestion(session.id);
+
+      if (question) {
+        if (question.pendingAttempt?.id) {
+          // Unresolved question with a retryable failed attempt
+          dispatch({ type: "SET_QUESTION", payload: question });
+          dispatch({ type: "SET_ANSWER_RESULT", payload: null });
+          dispatch({ type: "SET_EXPLANATION", payload: null });
+          dispatch({ type: "SET_EXPLANATION_ERROR", payload: null });
+          dispatch({ type: "SET_CHECKPOINT_STATE", payload: null });
+          dispatch({ type: "SET_CHECKPOINT_ERROR", payload: null }); // clears all
+          dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: question.pendingAttempt.id });
+          dispatch({ type: "SET_FAILED_TRANSCRIPT", payload: question.pendingAttempt.transcriptText || null });
+          dispatch({ type: "SET_ERROR", payload: { code: "EVALUATION_FAILED",
+            message: "We couldn't evaluate your answer. Please try again." } });
+        } else {
+          // No pending attempt — fresh recording
+          // (covers both: fresh unanswered Q and normal-retries-exhausted Q)
+          dispatch({ type: "SET_QUESTION", payload: question });
+          dispatch({ type: "SET_ANSWER_RESULT", payload: null });
+          dispatch({ type: "SET_EXPLANATION", payload: null });
+          dispatch({ type: "SET_EXPLANATION_ERROR", payload: null });
+          dispatch({ type: "SET_CHECKPOINT_STATE", payload: null });
+          dispatch({ type: "SET_CHECKPOINT_ERROR", payload: null });
+          dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: null });
+          dispatch({ type: "SET_FAILED_TRANSCRIPT", payload: null });
+          dispatch({ type: "SET_ERROR", payload: null });
+          dispatch({ type: "SET_STATE", payload: "asking" });
+        }
+      } else {
+        // Current question is "answered" — advance.
+        // Call getNextAction FIRST. Only clear state after a valid result is confirmed.
+        let result;
+        try {
+          result = await getNextAction(session.id);
+        } catch {
+          // getNextAction failed — preserve all existing state
+          dispatch({ type: "SET_ERROR", payload: { code: "RECONCILIATION_FAILED",
+            message: "We couldn't verify your progress. Please try again." } });
+          return;
+        }
+
+        // Validate the response before clearing any state
+        const isValidResult =
+          (result.action === "question" && result.question != null) ||
+          (result.action === "complete") ||
+          (result.action === "checkpoint" && Array.isArray(result.unresolvedQuestions));
+
+        if (!isValidResult) {
+          dispatch({ type: "SET_ERROR", payload: { code: "RECONCILIATION_FAILED",
+            message: "We couldn't verify your progress. Please try again." } });
+          return;
+        }
+
+        // getNextAction succeeded and response is valid — now perform destination-specific cleanup
+        if (result.action === "question") {
+          dispatch({ type: "SET_ANSWER_RESULT", payload: null });
+          dispatch({ type: "SET_EXPLANATION", payload: null });
+          dispatch({ type: "SET_EXPLANATION_ERROR", payload: null });
+          dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: null });
+          dispatch({ type: "SET_FAILED_TRANSCRIPT", payload: null });
+          dispatch({ type: "SET_ERROR", payload: null });
+          dispatch({ type: "SET_CHECKPOINT_STATE", payload: null });
+          dispatch({ type: "SET_CHECKPOINT_ERROR", payload: null });
+          dispatch({ type: "SET_QUESTION", payload: result.question });
+          dispatch({ type: "SET_STATE", payload: "asking" });
+        } else if (result.action === "complete") {
+          dispatch({ type: "SET_ANSWER_RESULT", payload: null });
+          dispatch({ type: "SET_EXPLANATION", payload: null });
+          dispatch({ type: "SET_EXPLANATION_ERROR", payload: null });
+          dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: null });
+          dispatch({ type: "SET_FAILED_TRANSCRIPT", payload: null });
+          dispatch({ type: "SET_ERROR", payload: null });
+          dispatch({ type: "SET_CHECKPOINT_STATE", payload: null });
+          dispatch({ type: "SET_CHECKPOINT_ERROR", payload: null });
+          dispatch({ type: "SET_STATE", payload: "completing" });
+          await triggerReportGeneration(session.id);
+        } else if (result.action === "checkpoint") {
+          dispatch({ type: "SET_ANSWER_RESULT", payload: null });
+          dispatch({ type: "SET_EXPLANATION", payload: null });
+          dispatch({ type: "SET_EXPLANATION_ERROR", payload: null });
+          dispatch({ type: "SET_PENDING_ATTEMPT_ID", payload: null });
+          dispatch({ type: "SET_FAILED_TRANSCRIPT", payload: null });
+          dispatch({ type: "SET_ERROR", payload: null });
+          // Do NOT clear checkpointError — per-question errors survive re-entry
+          dispatch({ type: "SET_CHECKPOINT_STATE",
+            payload: { unresolvedQuestions: result.unresolvedQuestions } });
+          dispatch({ type: "SET_STATE", payload: "checkpoint" });
+        }
+      }
+    } catch {
+      // getCurrentQuestion threw — preserve ALL existing state
+      dispatch({ type: "SET_ERROR", payload: { code: "RECONCILIATION_FAILED",
+        message: "We couldn't verify your progress. Please try again." } });
+    } finally {
+      dispatch({ type: "SET_LOADING", payload: false });
+    }
+  }, [state.session]);
+
   // ── Clear error / dismiss ─────────────────────────────────────────────────
   // Returns to the most sensible previous state given what's in context:
   //   - active session + current question → "asking" (resume where we were)
@@ -751,6 +883,7 @@ export function InterviewProvider({ children }) {
     finishInterview,
     clearError,
     resetInterview,
+    reconcileAndRecover,
     // Checkpoint actions
     skipQuestionAction,
     reevaluateAtCheckpoint,
