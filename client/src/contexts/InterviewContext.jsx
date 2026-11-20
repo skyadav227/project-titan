@@ -737,7 +737,7 @@ export function InterviewProvider({ children }) {
     }
     dispatch({ type: "SET_LOADING", payload: true });
     try {
-      const question = await getCurrentQuestion(session.id);
+      const { question } = await getCurrentQuestion(session.id);
 
       if (question) {
         if (question.pendingAttempt?.id) {
