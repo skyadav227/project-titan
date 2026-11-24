@@ -68,6 +68,15 @@ module.exports = {
   CHECKPOINT_REEVAL_LIMIT: parseInt(process.env.CHECKPOINT_REEVAL_LIMIT, 10) || 2,
   AI_TIMEOUT_MS: parseInt(process.env.AI_TIMEOUT_MS, 10) || 30000,
 
+  // Cloudflare Workers AI Gateway (development-only opt-in)
+  // Guard: disabled in production AND when NODE_ENV is missing or empty
+  CF_AI_GATEWAY_ENABLED: process.env.CF_AI_GATEWAY_ENABLED === "true"
+    && !!process.env.NODE_ENV
+    && process.env.NODE_ENV !== "production",
+  CF_ACCOUNT_ID:    process.env.CF_ACCOUNT_ID    || "",
+  CF_API_TOKEN:     process.env.CF_API_TOKEN     || "",
+  CF_AI_GATEWAY_ID: process.env.CF_AI_GATEWAY_ID || "titan-observability-dev",
+
   // Derived
   IS_PRODUCTION: process.env.NODE_ENV === "production",
 };

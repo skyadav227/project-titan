@@ -22,6 +22,9 @@ function getAdapter() {
   if (AI_PROVIDER === "openrouter") {
     return require("./providers/openRouterAdapter");
   }
+  if (AI_PROVIDER === "cloudflare_workers") {
+    return require("./providers/cloudflareWorkersAdapter");
+  }
   throw new Error(`Unknown AI_PROVIDER: "${AI_PROVIDER}". Check your .env file.`);
 }
 
