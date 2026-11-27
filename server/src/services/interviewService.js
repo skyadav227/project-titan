@@ -1798,10 +1798,12 @@ async function generateReport(sessionId, userId) {
   const staleThreshold = new Date(now.getTime() - REPORT_GENERATION_LEASE_MS);
   const myToken = uuidv4();
 
-  const claimed = await InterviewSession.findOneAndUpdate(
+  // Path 1: existing subdocument — dot-notation is safe (finalReport is not null)
+  let claimed = await InterviewSession.findOneAndUpdate(
     {
       _id: sessionId,
       userId,
+      finalReport: { $ne: null },
       $or: [
         { "finalReport.status": { $nin: ["ready", "generating"] } },
         {
@@ -1819,6 +1821,28 @@ async function generateReport(sessionId, userId) {
     },
     { new: true }
   );
+
+  // Path 2: finalReport is null (new session, never attempted before).
+  // Cannot use dot-notation into null — initialize the subdocument atomically.
+  if (!claimed) {
+    claimed = await InterviewSession.findOneAndUpdate(
+      {
+        _id: sessionId,
+        userId,
+        finalReport: null,
+      },
+      {
+        $set: {
+          finalReport: {
+            status:              "generating",
+            generationStartedAt: now,
+            generationToken:     myToken,
+          }
+        }
+      },
+      { new: true }
+    );
+  }
 
   if (!claimed) {
     const current = await InterviewSession.findOne({ _id: sessionId, userId });

@@ -176,6 +176,24 @@ async function generate(systemPrompt, userPrompt, options = {}) {
     throw err;
   }
 
+  // ── Detect truncated output from token-limit cutoff ───────────────────────
+  // finish_reason:"length" means the model ran out of output tokens mid-response.
+  // The content string exists but is almost certainly incomplete JSON.
+  // Throw AI_EMPTY_RESPONSE so withRetry can attempt again.
+  if (finishReason === "length") {
+    console.warn(
+      "[cloudflareWorkersAdapter] finish_reason=length — output truncated:",
+      JSON.stringify({
+        model,
+        finish_reason: finishReason,
+        usage:         json?.usage || null,
+      })
+    );
+    const err = new Error("AI response was truncated (finish_reason: length). Please try again.");
+    err.code = "AI_EMPTY_RESPONSE";
+    throw err;
+  }
+
   console.info("[cloudflareWorkersAdapter] Response OK:", JSON.stringify({
     provider:      "cloudflare_workers",
     model,

@@ -236,7 +236,7 @@ async function generateQuestion(ctx) {
 
   return withRetry(async () => {
     const raw = await adapter.generate(systemPrompt, userPrompt, {
-      maxTokens:   800,
+      maxTokens:   1500,
       temperature: 0.7, // variability for question diversity
     });
     return parseQuestionGenerationResponse(raw);
@@ -256,7 +256,7 @@ async function evaluateAnswer(ctx) {
   if (AI_EVAL_MODELS.length > 0) {
     return withEvalModelFallback(async (model) => {
       const raw = await adapter.generate(systemPrompt, userPrompt, {
-        maxTokens: 2000, temperature: 0.1, model,
+        maxTokens: 3000, temperature: 0.1, model,
       });
       return parseEvaluationResponse(raw);
     }, AI_EVAL_MODELS);
@@ -265,7 +265,7 @@ async function evaluateAnswer(ctx) {
   // AI_EVAL_MODELS not configured — existing behavior unchanged
   return withRetry(async () => {
     const raw = await adapter.generate(systemPrompt, userPrompt, {
-      maxTokens:   2000,
+      maxTokens:   3000,
       temperature: 0.1,
     });
     return parseEvaluationResponse(raw);

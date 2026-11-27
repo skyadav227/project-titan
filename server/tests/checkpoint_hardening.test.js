@@ -329,6 +329,82 @@ test("21. Token ownership — wrong token fails finalization", () => {
   assert(finalized === null, "Wrong token should fail finalization");
 });
 
+// ── Tests 21a-21e: null-finalReport two-path claim (new sessions) ─────────────
+
+// The service uses two sequential findOneAndUpdate calls:
+//   Path 1: finalReport $ne null  (existing subdoc, dot-notation safe)
+//   Path 2: finalReport === null  (new session, full subdoc $set)
+// These tests simulate that two-path logic to verify correctness.
+// NOTE: These are logic simulations — they do not make real MongoDB calls.
+// Real MongoDB atomicity is verified by the existing integration-level tests (16-21)
+// and by the E2E test which exercises the actual DB path.
+
+function simulateTwoPathClaim(currentFinalReport, now, myToken) {
+  const LEASE_MS = 5 * 60 * 1000;
+  const staleThreshold = new Date(now.getTime() - LEASE_MS);
+
+  // Path 1: existing subdocument
+  if (currentFinalReport !== null) {
+    const status = currentFinalReport?.status;
+    const startedAt = currentFinalReport?.generationStartedAt || null;
+    const isStale = startedAt !== null && startedAt < staleThreshold;
+    const canClaim =
+      !["ready", "generating"].includes(status) ||
+      (status === "generating" && isStale);
+    if (canClaim) {
+      return { ...currentFinalReport, status: "generating", generationStartedAt: now, generationToken: myToken };
+    }
+    return null; // blocked by path 1
+  }
+
+  // Path 2: null — initialize subdocument
+  return { status: "generating", generationStartedAt: now, generationToken: myToken };
+}
+
+test("21a. null finalReport — path 2 initialises subdocument", () => {
+  const now = new Date();
+  const result = simulateTwoPathClaim(null, now, "tok-a");
+  assert(result !== null, "null finalReport should be claimable via path 2");
+  assert(result.status === "generating", "claimed status should be 'generating'");
+  assert(result.generationToken === "tok-a", "token should be set");
+  assert(result.generationStartedAt === now, "generationStartedAt should be set");
+});
+
+test("21b. null finalReport — concurrent second claim blocked (path 2 returns null once claimed)", () => {
+  const now = new Date();
+  // Simulate: request A claims via path 2, sets finalReport = { status: "generating", ... }
+  // Request B now sees a non-null subdocument with status "generating" (fresh lock).
+  // Path 1 of request B: $ne null passes, but status is "generating" (fresh) → not claimable.
+  // Path 2 of request B: finalReport is not null → skipped.
+  const afterAClaims = { status: "generating", generationStartedAt: now, generationToken: "tok-a" };
+  const resultB = simulateTwoPathClaim(afterAClaims, now, "tok-b");
+  assert(resultB === null, "Second concurrent claim on a fresh generating lock should be blocked");
+});
+
+test("21c. not_started subdocument — path 1 claims via dot-notation", () => {
+  const now = new Date();
+  const notStarted = { status: "not_started", generationStartedAt: null, generationToken: null };
+  const result = simulateTwoPathClaim(notStarted, now, "tok-c");
+  assert(result !== null, "not_started subdocument should be claimable via path 1");
+  assert(result.status === "generating", "status should be 'generating'");
+});
+
+test("21d. ready subdocument — both paths reject (report already complete)", () => {
+  const now = new Date();
+  const ready = { status: "ready", generationStartedAt: null, generationToken: null };
+  const result = simulateTwoPathClaim(ready, now, "tok-d");
+  assert(result === null, "ready report should not be reclaimable");
+});
+
+test("21e. stale generating subdocument — path 1 recovers lease", () => {
+  const now = new Date();
+  const staleStart = new Date(now.getTime() - 6 * 60 * 1000); // 6 min ago
+  const stale = { status: "generating", generationStartedAt: staleStart, generationToken: "tok-old" };
+  const result = simulateTwoPathClaim(stale, now, "tok-new");
+  assert(result !== null, "Stale lock should be reclaimable via path 1");
+  assert(result.generationToken === "tok-new", "New token should replace stale token");
+});
+
 // ── Tests 22-24: Source inspections ──────────────────────────────────────────
 
 test("22. MIME normalisation present in uploadAudio.js", () => {

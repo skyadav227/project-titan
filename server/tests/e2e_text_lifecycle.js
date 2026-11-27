@@ -115,14 +115,14 @@ async function run() {
   }
 
   // ── 3. Start interview ─────────────────────────────────────────────────────
-  step("Start interview — generates Q1 via OpenRouter");
+  step("Start interview — generates Q1 via AI provider");
   {
-    log("  Calling OpenRouter (may take up to 30 s)...");
+    log("  Calling AI provider (may take up to 30 s)...");
     const r = await api("POST", `/interviews/${sessionId}/start`);
     if (!r.ok) {
       log(`  ✗ START FAILED (${r.status}): ${JSON.stringify(r.error)}`);
       log("  → BLOCKED: AI provider unavailable — cannot continue without Q1");
-      log("\nAI STATUS: BLOCKED — check OPENROUTER_API_KEY in server/.env");
+      log("\nAI STATUS: BLOCKED — check AI provider configuration in server/.env");
       process.exit(2);
     }
     assert(r.data?.question?.text, "question text present");
@@ -150,8 +150,8 @@ async function run() {
   // ── 5. Submit first text answer ────────────────────────────────────────────
   step("Submit text answer for Q1 — routes through AI evaluation");
   {
-    const ANSWER = "JWT authentication works by generating a signed token on the server after the user logs in with valid credentials. The token contains claims about the user and is signed with a secret key. The client stores the token and sends it in the Authorization header for subsequent requests. The server verifies the token signature on each request without needing a database lookup, making it stateless and scalable.";
-    log("  Evaluating via OpenRouter (may take up to 30 s)...");
+    const ANSWER = "I have around four years of experience building full-stack web applications, primarily using Node.js on the backend and React on the frontend, with PostgreSQL and MongoDB as datastores. I have shipped several production REST APIs and worked on features ranging from authentication flows to real-time dashboards. I am comfortable owning a feature end-to-end, from database schema design through to frontend state management, and I particularly enjoy improving performance and reliability.";
+    log("  Evaluating via AI provider (may take up to 30 s)...");
     const r = await submitText(sessionId, q1Id, ANSWER, `idem_${TS}_q1`);
     if (!r.ok) {
       log(`  ✗ SUBMIT FAILED (${r.status}): ${JSON.stringify(r.error)}`);
@@ -197,8 +197,8 @@ async function run() {
       // ── 7. Submit retry answer ─────────────────────────────────────────────
       step("Submit improved retry answer for Q1");
       {
-        const RETRY_ANSWER = "JWT (JSON Web Token) authentication is a stateless authentication mechanism. When a user logs in, the server validates the credentials, creates a JWT containing user claims (like userId and role), signs it using a secret key with an algorithm like HS256, and returns it. The client stores the token (typically in memory or localStorage) and includes it in the Authorization Bearer header for API calls. The server verifies the signature on each request to authenticate without a session store. Tokens have an expiry (exp claim) for security. Refresh tokens can be used to obtain new access tokens without re-authentication.";
-        log("  Evaluating via OpenRouter...");
+        const RETRY_ANSWER = "I started as a junior developer working primarily on backend APIs and gradually moved into full-stack ownership. Over time I took on React frontends, improved CI/CD pipelines, and started mentoring junior teammates. I value clear API contracts, robust error handling, and writing code that is easy for the next engineer to understand. My goal is always to leave a codebase in a better state than I found it.";
+        log("  Evaluating via AI provider...");
         const r2 = await submitText(sessionId, q1Id, RETRY_ANSWER, `idem_${TS}_q1_retry`);
         if (!r2.ok) {
           log(`  Retry submit failed (${r2.status}): ${JSON.stringify(r2.error)} — continuing`);
@@ -247,7 +247,7 @@ async function run() {
   // ── 10. Get next action ───────────────────────────────────────────────────
   step("POST /next — generate Q2 (adaptive follow-up)");
   {
-    log("  Generating next question via OpenRouter...");
+    log("  Generating next question via AI provider...");
     const r = await api("POST", `/interviews/${sessionId}/next`);
     if (!r.ok) {
       log(`  /next failed (${r.status}): ${JSON.stringify(r.error)}`);
@@ -269,8 +269,8 @@ async function run() {
   if (q2Id) {
     step("Submit text answer for Q2");
     {
-      const ANSWER2 = "To improve this authentication system I would add refresh token rotation, implement token blacklisting for logout using Redis, add rate limiting to the login endpoint to prevent brute force attacks, use short-lived access tokens with longer-lived refresh tokens, and implement proper CORS policies. I would also add logging and monitoring for suspicious token usage patterns.";
-      log("  Evaluating via OpenRouter...");
+      const ANSWER2 = "The most challenging aspect of full-stack development is keeping the frontend and backend contract consistent as requirements change quickly. I address this by defining shared TypeScript interfaces and an OpenAPI schema that both sides compile against, so type mismatches surface at build time rather than in production. I also invest in integration tests at the API boundary so that any breaking change is caught before it reaches a release branch.";
+      log("  Evaluating via AI provider...");
       const r = await submitText(sessionId, q2Id, ANSWER2, `idem_${TS}_q2`);
       if (!r.ok) {
         log(`  Q2 submit failed (${r.status}): ${JSON.stringify(r.error)}`);
@@ -285,44 +285,56 @@ async function run() {
     }
   }
 
-  // ── 12. End interview ─────────────────────────────────────────────────────
-  step("End interview (user_ended)");
+  // ── 12. Natural completion via /next ─────────────────────────────────────
+  step("POST /next after Q2 — confirm natural completion (action: complete)");
   {
-    const r = await api("POST", `/interviews/${sessionId}/end`, { reason: "user_ended" });
-    // 409 = already ended/completed — that's fine
-    if (r.status === 409) {
-      log(`  Already ended (${r.error?.code}) — continuing`);
-    } else {
-      assert(r.ok, `end HTTP ${r.status}: ${JSON.stringify(r.error)}`);
-      assertIn(r.data?.status, ["abandoned","completed"], "terminal status");
-      log(`  session status: ${r.data?.status}`);
+    const r = await api("POST", `/interviews/${sessionId}/next`);
+    if (!r.ok) {
+      log(`  ✗ /next failed (${r.status}): ${JSON.stringify(r.error)}`);
+      process.exit(1);
     }
+    if (r.data?.action === "checkpoint") {
+      log(`  ✗ CHECKPOINT fired — unresolved questions detected:`);
+      log(`  ${JSON.stringify(r.data.unresolvedQuestions)}`);
+      log("  → Q2 evaluation may have left a question in 'asked' status");
+      process.exit(3);
+    }
+    assert(r.data?.action === "complete", `action must be "complete", got "${r.data?.action}"`);
+    assert(!r.data?.question, "no new question should be returned with action: complete");
+    log(`  action: ${r.data.action} — natural completion confirmed`);
   }
 
   // ── 13. Generate final report ─────────────────────────────────────────────
   step("Generate final master report");
   {
-    log("  Synthesising report via OpenRouter...");
+    log("  Synthesising report via AI provider...");
     const r = await api("POST", `/interviews/${sessionId}/report`);
     if (r.status === 502) {
       log("  BLOCKED: AI provider unavailable for report");
-    } else if (!r.ok) {
-      log(`  Report generation failed (${r.status}): ${JSON.stringify(r.error)}`);
-    } else {
-      log(`  Report status: ${r.data?.status || "immediate"}`);
-      if (r.data?.overallScore !== undefined) {
-        assertRange(r.data.overallScore, 0, 100, "report overallScore");
-        assert(Array.isArray(r.data.strengths),        "strengths array");
-        assert(Array.isArray(r.data.improvements),     "improvements array");
-        assert(Array.isArray(r.data.recommendations),  "recommendations array");
-        assert(r.data.progress?.questionsAnswered >= 0,"questionsAnswered present");
-        log(`  overallScore:    ${r.data.overallScore}`);
-        log(`  strengths:       ${(r.data.strengths||[]).length}`);
-        log(`  improvements:    ${(r.data.improvements||[]).length}`);
-        log(`  questionsAnswered: ${r.data.progress?.questionsAnswered}`);
-        log(`  retriedCount:    ${r.data.progress?.questionsRetried}`);
-      }
+      process.exit(2);
     }
+    assert(r.ok, `report generation HTTP ${r.status}: ${JSON.stringify(r.error)}`);
+    log(`  Report status: ${r.data?.status || "immediate"}`);
+    if (r.data?.overallScore !== undefined) {
+      assertRange(r.data.overallScore, 0, 100, "report overallScore");
+      assert(Array.isArray(r.data.strengths),        "strengths array");
+      assert(Array.isArray(r.data.improvements),     "improvements array");
+      assert(Array.isArray(r.data.recommendations),  "recommendations array");
+      assert(r.data.progress?.questionsAnswered >= 0,"questionsAnswered present");
+      log(`  overallScore:    ${r.data.overallScore}`);
+      log(`  strengths:       ${(r.data.strengths||[]).length}`);
+      log(`  improvements:    ${(r.data.improvements||[]).length}`);
+      log(`  questionsAnswered: ${r.data.progress?.questionsAnswered}`);
+      log(`  retriedCount:    ${r.data.progress?.questionsRetried}`);
+    }
+
+    // ── Verify session reached "completed" and hasReport after report generation
+    const sessionCheck = await api("GET", `/interviews/${sessionId}`);
+    assert(sessionCheck.ok, `session fetch after report HTTP ${sessionCheck.status}`);
+    assert(sessionCheck.data?.status === "completed", `session status must be "completed" after report generation, got "${sessionCheck.data?.status}"`);
+    assert(sessionCheck.data?.hasReport === true, "session.hasReport must be true after report generation");
+    log(`  session status after report: ${sessionCheck.data?.status} ✓`);
+    log(`  session hasReport: ${sessionCheck.data?.hasReport} ✓`);
   }
 
   // ── 14. Get report ────────────────────────────────────────────────────────
@@ -330,13 +342,19 @@ async function run() {
   {
     const r = await api("GET", `/interviews/${sessionId}/report`);
     assert(r.ok, `get report HTTP ${r.status}`);
-    if (r.data && r.data.status !== "generating") {
-      log(`  report status: ${r.data?.status || "ready"}`);
-      if (r.data?.overallScore !== undefined) {
-        log(`  overallScore: ${r.data.overallScore}`);
-      }
+    assert(r.data, "report data present");
+    const reportStatus = r.data?.status;
+    log(`  report status: ${reportStatus}`);
+    if (reportStatus !== "generating") {
+      assertRange(r.data.overallScore, 0, 100, "report overallScore");
+      assert(Array.isArray(r.data.strengths),       "report strengths array");
+      assert(Array.isArray(r.data.improvements),    "report improvements array");
+      assert(Array.isArray(r.data.recommendations), "report recommendations array");
+      assert(r.data.progress?.questionsAnswered >= 1, "questionsAnswered >= 1");
+      log(`  overallScore:      ${r.data.overallScore}`);
+      log(`  questionsAnswered: ${r.data.progress?.questionsAnswered}`);
     } else {
-      log("  Report still generating (async) — checking is complete enough");
+      log("  Report still generating (async) — status check is complete enough");
     }
   }
 
